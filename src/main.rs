@@ -75,10 +75,12 @@ fn run_compose(args: &[String]) -> Result<(), DynErr> {
 }
 
 fn make_tooling_host() -> ToolingHost {
+    use handl_lib_hello::HelloLib;
+
     let mut loaders = LoaderRegistry::new();
     loaders.register(NativeLoader::new());
 
-    ToolingHost::new(
+    let mut host = ToolingHost::new(
         CanonicalKit::new(),
         Box::new(ExpressionFormatter::new()),
         Box::new(ExpressionDiagnostics::new()),
@@ -96,7 +98,10 @@ fn make_tooling_host() -> ToolingHost {
     .with_command_provider(Box::new(PluginManagerPlugin::new()))
     .with_command_provider(Box::new(ExtensionManagerPlugin::new()))
     .with_command_provider(Box::new(handl_host_lsp::LspCommandProvider::new()))
-    .with_loader_registry(loaders)
+    .with_loader_registry(loaders);
+
+    host.register_lib("hello", || Box::new(HelloLib));
+    host
 }
 
 fn build_cli(host: &ToolingHost) -> clap::Command {
@@ -173,7 +178,13 @@ fn main() -> Result<(), DynErr> {
 
     let mut host = make_tooling_host();
 
+    if let Some(path) = handl_tooling::Config::find() {
+        host.load_config(&path)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+    }
+
     let mut plugin_paths = Vec::new();
+    let mut lib_names = Vec::new();
     let mut rest = Vec::new();
     let mut i = 1;
     while i < args.len() {
@@ -182,6 +193,12 @@ fn main() -> Result<(), DynErr> {
                 return Err("missing value for --plugin".into());
             }
             plugin_paths.push(args[i + 1].clone());
+            i += 2;
+        } else if args[i] == "--lib" {
+            if i + 1 >= args.len() {
+                return Err("missing value for --lib".into());
+            }
+            lib_names.push(args[i + 1].clone());
             i += 2;
         } else {
             rest.push(args[i].clone());
@@ -195,6 +212,11 @@ fn main() -> Result<(), DynErr> {
         let manifest: PluginManifest = serde_json::from_str(&content)
             .map_err(|e| -> DynErr { Box::new(e) })?;
         host.load_plugin(&manifest)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+    }
+
+    for name in &lib_names {
+        host.load_lib_by_name(name)
             .map_err(|e| -> DynErr { Box::new(e) })?;
     }
 

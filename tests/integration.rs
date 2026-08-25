@@ -88,3 +88,28 @@ fn cli_loads_native_plugin_and_runs_echo() {
     );
     assert!(stdout.contains("hello"), "expected 'hello' in output, got: {stdout}");
 }
+
+#[test]
+fn cli_lib_hello_eval() {
+    let bin = env::var("CARGO_BIN_EXE_hnl").expect("CARGO_BIN_EXE_hnl");
+    let output = Command::new(&bin)
+        .arg("--lib")
+        .arg("hello")
+        .arg("eval")
+        .arg("hello.greet(\"world\")")
+        .output()
+        .expect("run hnl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        output.status.success(),
+        "hnl exited with {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
+    );
+    assert!(
+        stdout.contains("Hello, world!"),
+        "expected 'Hello, world!' in output, got: {stdout}"
+    );
+}

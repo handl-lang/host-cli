@@ -25,6 +25,7 @@ handl-loader-native.workspace = true
 handl-tooling.workspace = true
 handl-kit-canonical.workspace = true
 handl-host-lsp.workspace = true
+handl-lib-hello.workspace = true
 handl-plugin-fmt-expression.workspace = true
 handl-plugin-diag-expression.workspace = true
 handl-plugin-lsp-completion.workspace = true
