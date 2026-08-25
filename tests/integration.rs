@@ -81,3 +81,37 @@ fn lsp_help_shows_stdio_info() {
         stdout
     );
 }
+
+#[test]
+fn build_reports_success() {
+    let output = hnl().arg("build").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "build should succeed: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("built") || stdout.contains("true"),
+        "expected build success in stdout, got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn compile_reports_success() {
+    let output = hnl().arg("compile").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "compile should succeed: {}",
+        stderr
+    );
+    assert!(
+        stdout.contains("compiled") || stdout.contains("true"),
+        "expected compile success in stdout, got: {}",
+        stdout
+    );
+}

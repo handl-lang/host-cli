@@ -1,18 +1,17 @@
 use std::error::Error;
 use std::io::Read;
-use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use handl_kit_canonical::CanonicalKit;
 use handl_plugin_diag_expression::ExpressionDiagnostics;
 use handl_plugin_fmt_expression::ExpressionFormatter;
 use handl_plugin_lsp_completion::BasicCompletion;
 use handl_plugin_lsp_goto::BasicGotoDef;
 use handl_plugin_lsp_symbols::BasicDocumentSymbols;
-use handl_platform::{DefaultHost, Kit, KitManifest, LanguageHost};
+use handl_platform::{Kit, KitManifest, LanguageHost};
 use handl_plugin_comments::CommentsPlugin;
 use handl_plugin_doc_comments::DocCommentsPlugin;
-use handl_tooling::ToolingHost;
+use handl_tooling::{ArgSpec, CommandSpec, ToolingHost};
 
 use handl_ext_build::BuildPlugin;
 use handl_ext_compile::CompilePlugin;
@@ -25,27 +24,6 @@ use handl_ext_plugin::PluginManagerPlugin;
 use handl_ext_typecheck::TypecheckPlugin;
 
 type DynErr = Box<dyn Error + Sync + Send>;
-
-#[derive(Parser)]
-#[command(name = "handl", about = "Handl language CLI")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    #[command(about = "Format a Handl source file")]
-    Fmt { file: Option<PathBuf> },
-    #[command(about = "Evaluate a Handl expression")]
-    Eval { expr: Vec<String> },
-    #[command(about = "Typecheck a Handl source file")]
-    Typecheck { file: Option<PathBuf> },
-    #[command(about = "Start the stdio LSP server")]
-    Lsp,
-    #[command(external_subcommand)]
-    Other(Vec<String>),
-}
 
 #[derive(Parser)]
 #[command(name = "handl compose")]
@@ -94,22 +72,6 @@ fn run_compose(args: &[String]) -> Result<(), DynErr> {
     Ok(())
 }
 
-fn read_source_or_stdin(file: &Option<PathBuf>) -> Result<String, DynErr> {
-    match file.as_ref() {
-        Some(p) if p.as_os_str() == "-" || p.as_os_str() == "" => {
-            let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf)?;
-            Ok(buf)
-        }
-        Some(p) => Ok(std::fs::read_to_string(p)?),
-        None => {
-            let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf)?;
-            Ok(buf)
-        }
-    }
-}
-
 fn make_tooling_host() -> ToolingHost {
     ToolingHost::new(
         CanonicalKit::new(),
@@ -119,101 +81,73 @@ fn make_tooling_host() -> ToolingHost {
     .with_completion_plugin(Box::new(BasicCompletion::new()))
     .with_goto_def_plugin(Box::new(BasicGotoDef::new()))
     .with_document_symbols_plugin(Box::new(BasicDocumentSymbols::new()))
+    .with_command_provider(Box::new(FmtPlugin::new()))
+    .with_command_provider(Box::new(EvalPlugin::new()))
+    .with_command_provider(Box::new(TypecheckPlugin::new()))
+    .with_command_provider(Box::new(BuildPlugin::new()))
+    .with_command_provider(Box::new(CompilePlugin::new()))
+    .with_command_provider(Box::new(LintPlugin::new()))
+    .with_command_provider(Box::new(KitManagerPlugin::new()))
+    .with_command_provider(Box::new(PluginManagerPlugin::new()))
+    .with_command_provider(Box::new(ExtensionManagerPlugin::new()))
+    .with_command_provider(Box::new(handl_host_lsp::LspCommandProvider::new()))
 }
 
-fn run_fmt(file: &Option<PathBuf>) -> Result<(), DynErr> {
-    let source = read_source_or_stdin(file)?;
-    let host = make_tooling_host();
-    let formatted = host.format(&source)?;
-    print!("{}", formatted);
-    Ok(())
-}
-
-fn run_eval(expr: &[String]) -> Result<(), DynErr> {
-    if expr.is_empty() {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "eval requires an expression",
-        )));
+fn build_cli(host: &ToolingHost) -> clap::Command {
+    fn leak(s: String) -> &'static str {
+        &*Box::leak(s.into_boxed_str())
     }
-    let source = expr.join(" ");
-    let kit = CanonicalKit::new();
-    let output = kit.parse_module_recovered(&source);
-    if output
-        .diagnostics
-        .iter()
-        .any(|d| matches!(d.level, handl_expr::DiagnosticLevel::Error))
-    {
-        for d in &output.diagnostics {
-            eprintln!("{}: {}", diagnostic_label(d.level), d.message);
+
+    let mut cmd = clap::Command::new("hnl")
+        .about("Handl language CLI")
+        .subcommand_required(true)
+        .arg_required_else_help(true);
+
+    for spec in host.cli_commands() {
+        let CommandSpec {
+            name,
+            description,
+            aliases,
+            args,
+        } = spec;
+
+        let mut sub = clap::Command::new(leak(name))
+            .about(leak(description))
+            .subcommand_required(false)
+            .arg_required_else_help(false);
+
+        for alias in aliases {
+            sub = sub.visible_alias(leak(alias));
         }
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "parse error",
-        )));
-    }
-    let result = kit.eval(&output.stmts)?;
-    let values: Vec<serde_json::Value> = result
-        .values
-        .into_iter()
-        .map(|v| v.into_inner())
-        .collect();
-    println!("{}", serde_json::to_string_pretty(&values)?);
-    Ok(())
-}
 
-fn run_typecheck(file: &Option<PathBuf>) -> Result<(), DynErr> {
-    let source = read_source_or_stdin(file)?;
-    let kit = CanonicalKit::new();
-    let host = make_tooling_host();
-    let parsed = kit.parse_module_recovered(&source);
-    let mut diagnostics = parsed.diagnostics.clone();
-    diagnostics.extend(host.diagnose(&source));
+        for arg in args {
+            let ArgSpec {
+                name,
+                description,
+                required,
+                multiple,
+                allow_hyphen_values,
+            } = arg;
 
-    let mut has_errors = diagnostics
-        .iter()
-        .any(|d| matches!(d.level, handl_expr::DiagnosticLevel::Error));
-
-    for d in &diagnostics {
-        eprintln!("{}: {}", diagnostic_label(d.level), d.message);
-    }
-
-    match kit.typecheck(&parsed.stmts) {
-        Ok(out) => {
-            if !out.success {
-                has_errors = true;
-            }
+            let a = clap::Arg::new(leak(name))
+                .help(leak(description))
+                .required(required)
+                .allow_hyphen_values(allow_hyphen_values);
+            let a = if multiple {
+                a.num_args(0..)
+            } else {
+                a.num_args(0..=1)
+            };
+            sub = sub.arg(a);
         }
-        Err(e) => {
-            has_errors = true;
-            eprintln!("error: {}", e);
-        }
+
+        cmd = cmd.subcommand(sub);
     }
 
-    if has_errors {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "typecheck failed",
-        )));
-    }
-    Ok(())
+    cmd
 }
 
-fn run_lsp() -> Result<(), DynErr> {
-    let host = make_tooling_host();
-    handl_host_lsp::run_stdio(host)?;
-    Ok(())
-}
-
-fn diagnostic_label(level: handl_expr::DiagnosticLevel) -> &'static str {
-    match level {
-        handl_expr::DiagnosticLevel::Error => "error",
-        handl_expr::DiagnosticLevel::Warning => "warning",
-        handl_expr::DiagnosticLevel::Info => "info",
-    }
-}
-
-fn main() {
+fn main() -> Result<(), DynErr> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && args[1] == "compose" {
         if let Err(e) = run_compose(&args[1..]) {
@@ -223,51 +157,38 @@ fn main() {
         std::process::exit(0);
     }
 
-    let cli = Cli::parse();
+    let host = make_tooling_host();
+    let cli = build_cli(&host);
+    let matches = cli.get_matches_from(&args);
 
-    let result: Result<(), DynErr> = match cli.command {
-        Command::Fmt { file } => run_fmt(&file),
-        Command::Eval { expr } => run_eval(&expr),
-        Command::Typecheck { file } => run_typecheck(&file),
-        Command::Lsp => run_lsp(),
-        Command::Other(words) => run_capability(&words),
-    };
+    let (sub_name, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| -> DynErr { Box::new(std::io::Error::new(std::io::ErrorKind::Other, "no subcommand")) })?;
 
-    if let Err(e) = result {
-        eprintln!("{e}");
-        std::process::exit(1);
-    }
-}
+    let commands = host.cli_commands();
+    let spec = commands
+        .iter()
+        .find(|s| s.name == sub_name || s.aliases.iter().any(|a| a == sub_name))
+        .ok_or_else(|| -> DynErr { Box::new(std::io::Error::new(std::io::ErrorKind::Other, "unknown subcommand")) })?;
 
-fn run_capability(words: &[String]) -> Result<(), DynErr> {
-    let mut host = DefaultHost::new();
-    host.register_plugin(FmtPlugin::new());
-    host.register_plugin(LintPlugin::new());
-    host.register_plugin(TypecheckPlugin::new());
-    host.register_plugin(EvalPlugin::new());
-    host.register_plugin(CompilePlugin::new());
-    host.register_plugin(BuildPlugin::new());
-    host.register_plugin(ExtensionManagerPlugin::new());
-    host.register_plugin(KitManagerPlugin::new());
-    host.register_plugin(PluginManagerPlugin::new());
+    let arg_values: Vec<String> = spec
+        .args
+        .first()
+        .and_then(|arg| {
+            sub_matches
+                .get_raw(&arg.name)
+                .map(|vals| vals.map(|v| v.to_string_lossy().into_owned()).collect())
+        })
+        .unwrap_or_default();
 
-    let (code, out) = match handl_host_cli::run(words.iter().cloned(), &mut host) {
-        Ok((0, out)) => (0, out),
-        Ok((c, out)) => (c, out),
-        Err(e) => (1, e.to_string()),
-    };
-
-    if code == 0 {
-        println!("{out}");
+    if sub_name == "lsp" {
+        handl_host_lsp::run_stdio(host)?;
     } else {
-        eprintln!("{out}");
+        let result = host
+            .run_cli(sub_name, &arg_values)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+        println!("{}", serde_json::to_string_pretty(&result).map_err(|e| -> DynErr { Box::new(e) })?);
     }
 
-    if code != 0 {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "capability failed",
-        )));
-    }
     Ok(())
 }
