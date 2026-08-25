@@ -181,12 +181,10 @@ fn main() -> Result<(), DynErr> {
         })
         .unwrap_or_default();
 
-    if sub_name == "lsp" {
-        handl_host_lsp::run_stdio(host)?;
-    } else {
-        let result = host
-            .run_cli(sub_name, &arg_values)
-            .map_err(|e| -> DynErr { Box::new(e) })?;
+    let result = host
+        .run_cli_owned(sub_name, arg_values)
+        .map_err(|e| -> DynErr { Box::new(e) })?;
+    if !result.is_null() {
         println!("{}", serde_json::to_string_pretty(&result).map_err(|e| -> DynErr { Box::new(e) })?);
     }
 

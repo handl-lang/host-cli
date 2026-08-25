@@ -75,9 +75,25 @@ fn lsp_help_shows_stdio_info() {
         stderr
     );
     assert!(
-        stdout.to_lowercase().contains("lsp")
-            || stderr.to_lowercase().contains("lsp"),
-        "expected LSP help text, got stdout: {}",
+        stdout.to_lowercase().contains("start the stdio lsp server"),
+        "expected LSP description in help, got stdout: {}",
+        stdout
+    );
+}
+
+#[test]
+fn lsp_help_long_flag() {
+    let output = hnl().args(["lsp", "--help"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "lsp --help should succeed: {}",
+        stderr
+    );
+    assert!(
+        stdout.to_lowercase().contains("lsp"),
+        "expected LSP help text, got: {}",
         stdout
     );
 }
