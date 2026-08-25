@@ -1,0 +1,33 @@
+[package]
+name = "handl-host-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hnl"
+path = "src/main.rs"
+
+[dependencies]
+handl-platform.workspace = true
+handl-plugin-comments.workspace = true
+handl-plugin-doc-comments.workspace = true
+handl-ext-fmt.workspace = true
+handl-ext-lint.workspace = true
+handl-ext-typecheck.workspace = true
+handl-ext-eval.workspace = true
+handl-ext-compile.workspace = true
+handl-ext-build.workspace = true
+handl-ext-extension.workspace = true
+handl-ext-kit.workspace = true
+handl-ext-plugin.workspace = true
+handl-tooling.workspace = true
+handl-kit-canonical.workspace = true
+handl-host-lsp.workspace = true
+handl-plugin-fmt-expression.workspace = true
+handl-plugin-diag-expression.workspace = true
+handl-plugin-lsp-completion.workspace = true
+handl-plugin-lsp-goto.workspace = true
+handl-plugin-lsp-symbols.workspace = true
+handl-expr.workspace = true
+clap = { version = "4", features = ["derive"] }
+serde_json.workspace = true
