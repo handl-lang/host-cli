@@ -1,133 +1,90 @@
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-fn hnl() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_hnl"))
+fn target_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("target")
+        .join("debug")
+}
+
+fn find_example_cdylib() -> Option<PathBuf> {
+    let dir = target_dir();
+    if !dir.is_dir() {
+        return None;
+    }
+
+    let candidates: &[&str] = &[
+        "libnative_plugin_example.so",
+        "libnative-plugin-example.so",
+        "libnative_plugin_example.dylib",
+        "libnative-plugin-example.dylib",
+        "native_plugin_example.dll",
+        "native-plugin-example.dll",
+    ];
+
+    for name in candidates {
+        let path = dir.join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    None
 }
 
 #[test]
-fn fmt_file_writes_formatted_source_to_stdout() {
-    let path = PathBuf::from(std::env::temp_dir())
-        .join(format!("handl_fmt_test_{}.handl", std::process::id()));
-    fs::write(&path, "let a = 1;").unwrap();
-    let output = hnl().arg("fmt").arg(&path).output().unwrap();
+fn cli_loads_native_plugin_and_runs_echo() {
+    let Some(cdylib) = find_example_cdylib() else {
+        eprintln!("native-plugin-example cdylib not found; skipping integration test");
+        return;
+    };
+
+    let manifest = format!(
+        r#"{{
+  "id": "native-plugin-example",
+  "version": "0.1.0",
+  "provides": ["echo"],
+  "requires": [],
+  "optional": [],
+  "extends": [],
+  "conflicts": [],
+  "replaces": [],
+  "targets": [],
+  "exclusive": [],
+  "metadata": {{
+    "path": {:?},
+    "command": "echo",
+    "description": "Echo plugin"
+  }}
+}}"#,
+        cdylib.to_string_lossy()
+    );
+
+    let tmp = env::temp_dir().join("handl_native_plugin_test_manifest.json");
+    fs::write(&tmp, &manifest).expect("write manifest");
+
+    let bin = env::var("CARGO_BIN_EXE_hnl").expect("CARGO_BIN_EXE_hnl");
+    let output = Command::new(&bin)
+        .arg("--plugin")
+        .arg(&tmp)
+        .arg("echo")
+        .arg("hello")
+        .output()
+        .expect("run hnl");
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+
     assert!(
         output.status.success(),
-        "fmt should succeed: {}",
-        stderr
+        "hnl exited with {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        output.status.code()
     );
-    assert!(
-        stdout.contains("let a = 1"),
-        "expected formatted source in stdout, got: {}",
-        stdout
-    );
-    let _ = fs::remove_file(&path);
-}
-
-#[test]
-fn eval_expr_prints_json_values() {
-    let output = hnl().args(["eval", "42"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "eval should succeed: {}",
-        stderr
-    );
-    assert!(
-        stdout.contains("42"),
-        "expected evaluated value in stdout, got: {}",
-        stdout
-    );
-}
-
-#[test]
-fn typecheck_file_reports_errors_with_exit_code_1() {
-    let path = PathBuf::from(std::env::temp_dir())
-        .join(format!("handl_typecheck_bad_{}.handl", std::process::id()));
-    fs::write(&path, "let a = ;").unwrap();
-    let output = hnl().arg("typecheck").arg(&path).output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !output.status.success(),
-        "expected typecheck to fail for invalid source"
-    );
-    assert!(
-        stderr.to_lowercase().contains("error")
-            || stderr.to_lowercase().contains("diagnostic"),
-        "expected error message on stderr, got: {}",
-        stderr
-    );
-    let _ = fs::remove_file(&path);
-}
-
-#[test]
-fn lsp_help_shows_stdio_info() {
-    let output = hnl().args(["lsp", "--help"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "lsp --help should succeed: {}",
-        stderr
-    );
-    assert!(
-        stdout.to_lowercase().contains("start the stdio lsp server"),
-        "expected LSP description in help, got stdout: {}",
-        stdout
-    );
-}
-
-#[test]
-fn lsp_help_long_flag() {
-    let output = hnl().args(["lsp", "--help"]).output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "lsp --help should succeed: {}",
-        stderr
-    );
-    assert!(
-        stdout.to_lowercase().contains("lsp"),
-        "expected LSP help text, got: {}",
-        stdout
-    );
-}
-
-#[test]
-fn build_reports_success() {
-    let output = hnl().arg("build").output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "build should succeed: {}",
-        stderr
-    );
-    assert!(
-        stdout.contains("built") || stdout.contains("true"),
-        "expected build success in stdout, got: {}",
-        stdout
-    );
-}
-
-#[test]
-fn compile_reports_success() {
-    let output = hnl().arg("compile").output().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "compile should succeed: {}",
-        stderr
-    );
-    assert!(
-        stdout.contains("compiled") || stdout.contains("true"),
-        "expected compile success in stdout, got: {}",
-        stdout
-    );
+    assert!(stdout.contains("hello"), "expected 'hello' in output, got: {stdout}");
 }

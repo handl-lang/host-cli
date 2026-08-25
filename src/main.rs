@@ -3,12 +3,14 @@ use std::io::Read;
 
 use clap::Parser;
 use handl_kit_canonical::CanonicalKit;
+use handl_loader::LoaderRegistry;
+use handl_loader_native::NativeLoader;
 use handl_plugin_diag_expression::ExpressionDiagnostics;
 use handl_plugin_fmt_expression::ExpressionFormatter;
 use handl_plugin_lsp_completion::BasicCompletion;
 use handl_plugin_lsp_goto::BasicGotoDef;
 use handl_plugin_lsp_symbols::BasicDocumentSymbols;
-use handl_platform::{Kit, KitManifest, LanguageHost};
+use handl_platform::{Kit, KitManifest, LanguageHost, PluginManifest};
 use handl_plugin_comments::CommentsPlugin;
 use handl_plugin_doc_comments::DocCommentsPlugin;
 use handl_tooling::{ArgSpec, CommandSpec, ToolingHost};
@@ -73,6 +75,9 @@ fn run_compose(args: &[String]) -> Result<(), DynErr> {
 }
 
 fn make_tooling_host() -> ToolingHost {
+    let mut loaders = LoaderRegistry::new();
+    loaders.register(NativeLoader::new());
+
     ToolingHost::new(
         CanonicalKit::new(),
         Box::new(ExpressionFormatter::new()),
@@ -91,6 +96,7 @@ fn make_tooling_host() -> ToolingHost {
     .with_command_provider(Box::new(PluginManagerPlugin::new()))
     .with_command_provider(Box::new(ExtensionManagerPlugin::new()))
     .with_command_provider(Box::new(handl_host_lsp::LspCommandProvider::new()))
+    .with_loader_registry(loaders)
 }
 
 fn build_cli(host: &ToolingHost) -> clap::Command {
@@ -101,7 +107,15 @@ fn build_cli(host: &ToolingHost) -> clap::Command {
     let mut cmd = clap::Command::new("hnl")
         .about("Handl language CLI")
         .subcommand_required(true)
-        .arg_required_else_help(true);
+        .arg_required_else_help(true)
+        .arg(
+            clap::Arg::new("plugin")
+                .long("plugin")
+                .global(true)
+                .num_args(1..)
+                .value_name("manifest.json")
+                .help("Load an external plugin manifest before dispatching a subcommand"),
+        );
 
     for spec in host.cli_commands() {
         let CommandSpec {
@@ -157,9 +171,35 @@ fn main() -> Result<(), DynErr> {
         std::process::exit(0);
     }
 
-    let host = make_tooling_host();
+    let mut host = make_tooling_host();
+
+    let mut plugin_paths = Vec::new();
+    let mut rest = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--plugin" {
+            if i + 1 >= args.len() {
+                return Err("missing value for --plugin".into());
+            }
+            plugin_paths.push(args[i + 1].clone());
+            i += 2;
+        } else {
+            rest.push(args[i].clone());
+            i += 1;
+        }
+    }
+
+    for path in &plugin_paths {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+        let manifest: PluginManifest = serde_json::from_str(&content)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+        host.load_plugin(&manifest)
+            .map_err(|e| -> DynErr { Box::new(e) })?;
+    }
+
     let cli = build_cli(&host);
-    let matches = cli.get_matches_from(&args);
+    let matches = cli.get_matches_from(std::iter::once(args[0].clone()).chain(rest));
 
     let (sub_name, sub_matches) = matches
         .subcommand()
