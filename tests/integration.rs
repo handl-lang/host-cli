@@ -93,7 +93,7 @@ fn cli_loads_native_plugin_and_runs_echo() {
 fn cli_lib_hello_eval() {
     let bin = env::var("CARGO_BIN_EXE_hnl").expect("CARGO_BIN_EXE_hnl");
     let output = Command::new(&bin)
-        .arg("--lib")
+        .arg("--kit")
         .arg("hello")
         .arg("eval")
         .arg("hello.greet(\"world\")")

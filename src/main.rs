@@ -1,5 +1,6 @@
 use handl_ext_cli::BasicCli;
-use handl_lib_hello::HelloLibraryPlugin;
+use handl_kit_canonical::CanonicalKit;
+use handl_kit_hello::HelloKit;
 use handl_platform::{CapabilityRequest, ConfigHostApplier, DefaultHost, HostApplier, PlatformError};
 use serde_json::json;
 
@@ -7,20 +8,25 @@ fn main() -> Result<(), PlatformError> {
     let mut host = DefaultHost::new();
     let applier = ConfigHostApplier::from_toml("")?;
     applier.apply(&mut host)?;
-    host.register_plugin(BasicCli::new());
-    host.register_plugin(HelloLibraryPlugin::new());
-    host.load()?;
 
     let args = std::env::args().collect::<Vec<_>>();
-    let name = args
-        .windows(2)
-        .find(|w| w[0] == "eval")
-        .and_then(|w| parse_greet_arg(&w[1]))
-        .unwrap_or("world".to_string());
+    let (kit_name, command, command_args) = parse_args(&args)?;
+
+    match kit_name {
+        "hello" => host.register_plugin(HelloKit::new()),
+        "canonical" => host.register_plugin(CanonicalKit::new()),
+        _ => return Err(PlatformError::InvalidMetadata(format!("unknown kit: {kit_name}"))),
+    };
+
+    host.register_plugin(BasicCli::new());
+    host.load()?;
 
     let resp = host.run(&CapabilityRequest {
-        capability: "hello.greet".into(),
-        payload: json!({ "name": name }),
+        capability: "cli".into(),
+        payload: json!({
+            "command": command,
+            "args": command_args,
+        }),
     })?;
 
     if let Some(s) = resp.0.as_str() {
@@ -29,11 +35,30 @@ fn main() -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn parse_greet_arg(expr: &str) -> Option<String> {
-    let rest = expr.strip_prefix("hello.greet")?;
-    let rest = rest.trim();
-    let inner = rest.strip_prefix("(")?.strip_suffix(")")?;
-    let inner = inner.trim();
-    let quoted = inner.strip_prefix('"')?.strip_suffix('"')?;
-    Some(quoted.to_string())
+fn parse_args(args: &[String]) -> Result<(&str, &str, Vec<&str>), PlatformError> {
+    let mut kit_name = "hello";
+    let mut command = "";
+    let mut command_args = Vec::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--kit" => {
+                i += 1;
+                kit_name = args
+                    .get(i)
+                    .ok_or_else(|| PlatformError::InvalidMetadata("missing --kit value".into()))?;
+            }
+            _ if command.is_empty() => {
+                command = &args[i];
+            }
+            _ => {
+                command_args.push(args[i].as_str());
+            }
+        }
+        i += 1;
+    }
+    if command.is_empty() {
+        return Err(PlatformError::InvalidMetadata("missing command".into()));
+    }
+    Ok((kit_name, command, command_args))
 }
