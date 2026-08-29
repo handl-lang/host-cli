@@ -1,5 +1,5 @@
-use handl_ext_cli::BasicCli;
-use handl_ext_kit::BasicKitLoader;
+use handl_plugin_ext_cli::BasicCli;
+use handl_plugin_ext_kit::BasicKitLoader;
 use handl_platform::{
     CapabilityRequest, ConfigHostApplier, DefaultHost, HostApplier, KitLoader, PlatformError,
 };
