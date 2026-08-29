@@ -1,11 +1,11 @@
 use handl_kit_canonical::{Kit, KitNode, KitValue};
-use handl_kit_cli::{CliHost, CliLimits};
-use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
+use handl_platform::{CapabilityRequest, DefaultHost, PlatformError, PluginRegistry};
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
-use handl_plugin_vm::{Expr, Pattern};
-use handl_plugin_vm_backend_rust_interpreter::CanonicalVm;
-use handl_plugin_vm_values_json::NonFunctionValue;
+use handl_plugin_vm::{Expr, HandlerClause, Pattern};
+use handl_plugin_vm_backend_rust_interpreter::{CanonicalEval, CanonicalVm};
+use handl_plugin_vm_common::{DynamicHost, ModuleHost};
+use handl_plugin_vm_values_json::{CanonicalContext, NonFunctionValue};
 use serde_json::json;
 
 fn main() -> Result<(), PlatformError> {
@@ -21,6 +21,11 @@ fn main() -> Result<(), PlatformError> {
     // Handle run command — uses the VM directly, bypassing the plugin system.
     if command == "run" {
         return run_file(command_args.first().copied());
+    }
+
+    // Handle eval command — uses the VM directly to evaluate an expression.
+    if command == "eval" {
+        return eval_expression(command_args.first().copied());
     }
 
     host.register_plugin(BootstrapPlugin::new(config_path, kit_name, applier_id));
@@ -47,6 +52,35 @@ fn main() -> Result<(), PlatformError> {
     Ok(())
 }
 
+fn build_cli_host() -> Result<DynamicHost, PlatformError> {
+    let mut registry = PluginRegistry::new();
+    registry.register(ModuleHost::new());
+    registry.register(handl_plugin_lib_os_std::LibraryPlugin);
+    registry.register(handl_plugin_lib_utils::LibraryPlugin);
+    registry.register(handl_plugin_lib_collections::LibraryPlugin);
+    registry.register(handl_plugin_lib_json::LibraryPlugin);
+    registry.register(handl_plugin_lib_toml::LibraryPlugin);
+    registry.register(handl_plugin_lib_yaml::LibraryPlugin);
+    let host = DynamicHost::from_registry(registry)?;
+    Ok(host.with_max_depth(256).with_max_calls(100_000))
+}
+
+fn new_context(host: &DynamicHost) -> CanonicalContext {
+    let mut ctx = CanonicalContext::new();
+    if let Some(max) = host.max_depth() {
+        ctx.set_max_depth(max);
+    }
+    if let Some(max) = host.max_calls() {
+        ctx.set_max_calls(max);
+    }
+    ctx.set_eval(Box::new(CanonicalEval::new(
+        host.clone(),
+        host.max_depth(),
+        host.max_calls(),
+    )));
+    ctx
+}
+
 fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
     let path = path.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
@@ -59,8 +93,8 @@ fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new();
     let stmts = kit.parse_module(&source)?;
 
-    let cli_host = CliHost::new(CliLimits::default());
-    let mut ctx = cli_host.new_context();
+    let cli_host = build_cli_host()?;
+    let mut ctx = new_context(&cli_host);
     let vm = CanonicalVm::new(cli_host);
 
     let mut last_value = NonFunctionValue::new(serde_json::Value::Null);
@@ -74,6 +108,33 @@ fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
 
     // Print the last expression's value.
     let inner = last_value.into_inner();
+    if let Some(s) = inner.as_str() {
+        println!("{s}");
+    } else {
+        println!("{}", serde_json::to_string_pretty(&inner).unwrap_or_default());
+    }
+
+    Ok(())
+}
+
+fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
+    let expr_str = expr.ok_or_else(|| {
+        PlatformError::InvalidMetadata("usage: hnl eval <expression>".into())
+    })?;
+
+    let kit = Kit::new();
+    let node = kit.parse(expr_str)?;
+
+    let cli_host = build_cli_host()?;
+    let mut ctx = new_context(&cli_host);
+    let vm = CanonicalVm::new(cli_host);
+
+    let expr = kitnode_to_expr(&node)?;
+    let value = vm.eval(&expr, &mut ctx).map_err(|e| {
+        PlatformError::Plugin(format!("evaluation error: {e:?}"))
+    })?;
+
+    let inner = value.into_inner();
     if let Some(s) = inner.as_str() {
         println!("{s}");
     } else {
@@ -135,11 +196,47 @@ fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformErr
         }
         KitNode::Match(m) => Expr::Match {
             subject: Box::new(kitnode_to_expr(&m.subject)?),
-            arms: Vec::new(),
+            arms: m.arms.iter().map(|arm| {
+                match &arm.pattern {
+                    KitNode::Literal(_) => {
+                        let pattern_expr = kitnode_to_expr(&arm.pattern)
+                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null)));
+                        let guard = Expr::call("cmp.eq", vec![
+                            Expr::Var("__match_subject".into()),
+                            pattern_expr,
+                        ]);
+                        let orig_guard = arm.guard.as_ref().map(|g| kitnode_to_expr(g)
+                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Bool(true)))));
+                        let combined_guard = if let Some(og) = orig_guard {
+                            Expr::call("bool.and", vec![guard, og])
+                        } else {
+                            guard
+                        };
+                        (Pattern::Identifier("__match_subject".into()), Some(combined_guard),
+                         kitnode_to_expr(&arm.body).unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null))))
+                    }
+                    _ => {
+                        let pattern = kitnode_to_pattern(&arm.pattern)
+                            .unwrap_or(Pattern::Identifier("_".into()));
+                        let guard = arm.guard.as_ref().map(|g| kitnode_to_expr(g)
+                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Bool(true)))));
+                        let body = kitnode_to_expr(&arm.body)
+                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null)));
+                        (pattern, guard, body)
+                    }
+                }
+            }).collect(),
         },
         KitNode::Handle(h) => Expr::Handle {
             body: Box::new(kitnode_to_expr(&h.expr)?),
-            handlers: Vec::new(),
+            handlers: h.handlers.iter().map(|handler| {
+                HandlerClause {
+                    op_name: handler.op_name.clone(),
+                    params: handler.params.clone(),
+                    continuation_name: handler.continuation_name.clone(),
+                    body: kitnode_to_expr(&handler.body).unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null))),
+                }
+            }).collect(),
         },
         KitNode::Function(f) => Expr::Function {
             type_params: Vec::new(),
@@ -156,6 +253,7 @@ fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformErr
 
 fn kitnode_to_pattern(node: &KitNode) -> Result<Pattern, PlatformError> {
     Ok(match node {
+        KitNode::Var(v) if v.name == "_" => Pattern::Identifier("_".into()),
         KitNode::Var(v) => Pattern::Identifier(v.name.clone()),
         KitNode::Literal(KitValue::Null) => Pattern::Identifier("_".into()),
         _ => return Err(PlatformError::Plugin(format!(
