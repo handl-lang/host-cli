@@ -1,7 +1,8 @@
 use handl_ext_cli::BasicCli;
-use handl_kit_canonical::CanonicalKit;
-use handl_kit_hello::HelloKit;
-use handl_platform::{CapabilityRequest, ConfigHostApplier, DefaultHost, HostApplier, PlatformError};
+use handl_ext_kit::BasicKitLoader;
+use handl_platform::{
+    CapabilityRequest, ConfigHostApplier, DefaultHost, HostApplier, KitLoader, PlatformError,
+};
 use serde_json::json;
 
 fn main() -> Result<(), PlatformError> {
@@ -12,11 +13,9 @@ fn main() -> Result<(), PlatformError> {
     let args = std::env::args().collect::<Vec<_>>();
     let (kit_name, command, command_args) = parse_args(&args)?;
 
-    match kit_name {
-        "hello" => host.register_plugin(HelloKit::new()),
-        "canonical" => host.register_plugin(CanonicalKit::new()),
-        _ => return Err(PlatformError::InvalidMetadata(format!("unknown kit: {kit_name}"))),
-    };
+    let loader = BasicKitLoader::new();
+    let kit = loader.load(&kit_name)?;
+    host.register_plugin(kit);
 
     host.register_plugin(BasicCli::new());
     host.load()?;
@@ -35,8 +34,8 @@ fn main() -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn parse_args(args: &[String]) -> Result<(&str, &str, Vec<&str>), PlatformError> {
-    let mut kit_name = "hello";
+fn parse_args(args: &[String]) -> Result<(String, &str, Vec<&str>), PlatformError> {
+    let mut kit_name = std::env::var("HANDL_KIT").unwrap_or_else(|_| "hello".to_string());
     let mut command = "";
     let mut command_args = Vec::new();
     let mut i = 1;
@@ -46,7 +45,8 @@ fn parse_args(args: &[String]) -> Result<(&str, &str, Vec<&str>), PlatformError>
                 i += 1;
                 kit_name = args
                     .get(i)
-                    .ok_or_else(|| PlatformError::InvalidMetadata("missing --kit value".into()))?;
+                    .ok_or_else(|| PlatformError::InvalidMetadata("missing --kit value".into()))?
+                    .to_string();
             }
             _ if command.is_empty() => {
                 command = &args[i];
