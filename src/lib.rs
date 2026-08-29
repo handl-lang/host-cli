@@ -125,7 +125,9 @@ impl Plugin for BasicCli {
                 };
                 plugin.run(&request, ctx)
             }
-            _ => Err(PlatformError::InvalidMetadata("expected object payload".into())),
+            _ => Err(PlatformError::InvalidMetadata(
+                "expected object payload".into(),
+            )),
         }
     }
 }
