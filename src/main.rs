@@ -12,6 +12,12 @@ fn main() -> Result<(), PlatformError> {
     host.register_plugin(BasicCli::new());
     host.load()?;
 
+    // Validate the composition before running any command.
+    if let Err(e) = host.resolve_composition() {
+        eprintln!("composition error: {e}");
+        return Err(PlatformError::Plugin(e.to_string()));
+    }
+
     let resp = host.run(&CapabilityRequest {
         capability: "cli".into(),
         payload: json!({
@@ -55,6 +61,9 @@ fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str
                     .get(i)
                     .ok_or_else(|| PlatformError::InvalidMetadata("missing --kit value".into()))?
                     .to_string();
+            }
+            "--" => {
+                // Separator: following args are the command and its args.
             }
             _ if command.is_empty() => {
                 command = &args[i];
