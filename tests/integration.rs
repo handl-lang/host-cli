@@ -86,7 +86,10 @@ fn cli_loads_native_plugin_and_runs_echo() {
         "hnl exited with {:?}\nstdout: {stdout}\nstderr: {stderr}",
         output.status.code()
     );
-    assert!(stdout.contains("hello"), "expected 'hello' in output, got: {stdout}");
+    assert!(
+        stdout.contains("hello"),
+        "expected 'hello' in output, got: {stdout}"
+    );
 }
 
 #[test]

@@ -47,6 +47,27 @@ hnl plugin add remote
 hnl kit add core fmt lint
 ```
 
+## Running `.hnl` files
+
+The `hnl` binary can parse and evaluate `.hnl` source files using the canonical VM backend:
+
+```bash
+cargo run -p handl-host-cli -- run examples/handl/lib-utils/hello.hnl
+```
+
+This reads the file, lexes and parses it with `Kit::parse_module`, converts each `KitNode` to a VM `Expr`, and evaluates it with `CanonicalVm` backed by `CliHost` (which provides `str.*`, `math.*`, `fs.*`, `env.*`, and other stdlib functions). The value of the last expression is printed to stdout.
+
+Example:
+
+```
+$ cat examples/handl/lib-utils/hello.hnl
+let greeting = str.concat("hello", " ", "world");
+greeting
+
+$ cargo run -p handl-host-cli -- run examples/handl/lib-utils/hello.hnl
+hello world
+```
+
 ## Tests
 
 ```sh
