@@ -92,9 +92,14 @@ fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformErr
             target: Box::new(kitnode_to_expr(&a.target)?),
             args: a.args.iter().map(kitnode_to_expr).collect::<Result<Vec<_>, _>>()?,
         },
-        KitNode::Index(i) => Expr::Index {
-            target: Box::new(kitnode_to_expr(&i.target)?),
-            index: Box::new(kitnode_to_expr(&i.index)?),
+        KitNode::Index(i) => {
+            let target = Box::new(kitnode_to_expr(&i.target)?);
+            match &i.index {
+                KitNode::Literal(KitValue::String(s)) => {
+                    Expr::FieldAccess { target, field: s.clone() }
+                }
+                _ => Expr::Index { target, index: Box::new(kitnode_to_expr(&i.index)?) },
+            }
         },
         KitNode::Pipe(p) => Expr::Pipe(
             Box::new(kitnode_to_expr(&p.left)?),
@@ -135,6 +140,12 @@ fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformErr
         KitNode::Handle(h) => Expr::Handle {
             body: Box::new(kitnode_to_expr(&h.expr)?),
             handlers: Vec::new(),
+        },
+        KitNode::Function(f) => Expr::Function {
+            type_params: Vec::new(),
+            params: f.params.iter().map(|p| (Pattern::Identifier(p.clone()), None)).collect(),
+            ret: None,
+            body: Box::new(kitnode_to_expr(&f.body)?),
         },
         KitNode::Import(_) | KitNode::Export(_) | KitNode::Module(_) => {
             // Skip declarations at the VM level for now.
