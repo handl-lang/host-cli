@@ -1,22 +1,18 @@
+use handl_plugin_applier::DefaultApplierPlugin;
 use handl_plugin_ext_cli::BasicCli;
-use handl_plugin_ext_kit::BasicKitLoader;
-use handl_platform::{
-    CapabilityRequest, ConfigHostApplier, DefaultHost, HostApplier, KitLoader, PlatformError,
-};
+use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use serde_json::json;
 
 fn main() -> Result<(), PlatformError> {
     let mut host = DefaultHost::new();
-    let applier = ConfigHostApplier::from_toml("")?;
-    applier.apply(&mut host)?;
-
     let args = std::env::args().collect::<Vec<_>>();
-    let (kit_name, command, command_args) = parse_args(&args)?;
+    let (applier_id, config_path, kit_name, command, command_args) = parse_args(&args)?;
 
-    let loader = BasicKitLoader::new();
-    let kit = loader.load(&kit_name)?;
-    host.register_plugin(kit);
+    if applier_id != "applier.default" {
+        return Err(PlatformError::InvalidMetadata(format!("unknown applier: {applier_id}")));
+    }
 
+    host.register_plugin(DefaultApplierPlugin::new(config_path).with_fallback_kit(kit_name));
     host.register_plugin(BasicCli::new());
     host.load()?;
 
@@ -34,13 +30,29 @@ fn main() -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn parse_args(args: &[String]) -> Result<(String, &str, Vec<&str>), PlatformError> {
+fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str>), PlatformError> {
+    let mut applier_id = "applier.default".to_string();
+    let mut config_path = ".handl.toml".to_string();
     let mut kit_name = std::env::var("HANDL_KIT").unwrap_or_else(|_| "hello".to_string());
     let mut command = "";
     let mut command_args = Vec::new();
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--applier" => {
+                i += 1;
+                applier_id = args
+                    .get(i)
+                    .ok_or_else(|| PlatformError::InvalidMetadata("missing --applier value".into()))?
+                    .to_string();
+            }
+            "--config" => {
+                i += 1;
+                config_path = args
+                    .get(i)
+                    .ok_or_else(|| PlatformError::InvalidMetadata("missing --config value".into()))?
+                    .to_string();
+            }
             "--kit" => {
                 i += 1;
                 kit_name = args
@@ -60,5 +72,5 @@ fn parse_args(args: &[String]) -> Result<(String, &str, Vec<&str>), PlatformErro
     if command.is_empty() {
         return Err(PlatformError::InvalidMetadata("missing command".into()));
     }
-    Ok((kit_name, command, command_args))
+    Ok((applier_id, config_path, kit_name, command, command_args))
 }
