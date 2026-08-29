@@ -4,7 +4,7 @@ use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_vm::{Expr, HandlerClause, Pattern};
 use handl_plugin_vm_backend_rust_interpreter::{CanonicalEval, CanonicalVm};
-use handl_plugin_vm_common::{DynamicHost, ModuleHost};
+use handl_plugin_vm_common::{DynamicRuntime, ModuleRuntime};
 use handl_plugin_vm_values_json::{CanonicalContext, NonFunctionValue};
 use serde_json::json;
 
@@ -52,20 +52,20 @@ fn main() -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn build_cli_host() -> Result<DynamicHost, PlatformError> {
+fn build_cli_host() -> Result<DynamicRuntime, PlatformError> {
     let mut registry = PluginRegistry::new();
-    registry.register(ModuleHost::new());
+    registry.register(ModuleRuntime::new());
     registry.register(handl_plugin_lib_os_std::LibraryPlugin);
     registry.register(handl_plugin_lib_utils::LibraryPlugin);
     registry.register(handl_plugin_lib_collections::LibraryPlugin);
     registry.register(handl_plugin_lib_json::LibraryPlugin);
     registry.register(handl_plugin_lib_toml::LibraryPlugin);
     registry.register(handl_plugin_lib_yaml::LibraryPlugin);
-    let host = DynamicHost::from_registry(registry)?;
+    let host = DynamicRuntime::from_registry(registry)?;
     Ok(host.with_max_depth(256).with_max_calls(100_000))
 }
 
-fn new_context(host: &DynamicHost) -> CanonicalContext {
+fn new_context(host: &DynamicRuntime) -> CanonicalContext {
     let mut ctx = CanonicalContext::new();
     if let Some(max) = host.max_depth() {
         ctx.set_max_depth(max);
@@ -124,12 +124,14 @@ fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
 
     let kit = Kit::new();
     let node = kit.parse(expr_str)?;
+    eprintln!("DEBUG parsed KitNode: {:#?}", node);
 
     let cli_host = build_cli_host()?;
     let mut ctx = new_context(&cli_host);
     let vm = CanonicalVm::new(cli_host);
 
     let expr = kitnode_to_expr(&node)?;
+    eprintln!("DEBUG Expr: {:#?}", expr);
     let value = vm.eval(&expr, &mut ctx).map_err(|e| {
         PlatformError::Plugin(format!("evaluation error: {e:?}"))
     })?;
