@@ -276,8 +276,12 @@ fn kitvalue_to_nonfunction(v: &KitValue) -> NonFunctionValue {
 
 fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new();
-    let info = handl_host_tooling::GrammarInfoProvider::grammar_info(&kit);
-    let grammar = handl_host_tooling::generate_textmate(&info);
+    let rules = kit.grammar_rules();
+    let grammar = handl_host_tooling::generate_textmate(
+        &rules,
+        kit.scope_name(),
+        &kit.file_extensions(),
+    );
 
     let json = serde_json::to_string_pretty(&grammar)
         .map_err(|e| PlatformError::InvalidMetadata(e.to_string()))?;
