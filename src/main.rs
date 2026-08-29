@@ -124,14 +124,12 @@ fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
 
     let kit = Kit::new();
     let node = kit.parse(expr_str)?;
-    eprintln!("DEBUG parsed KitNode: {:#?}", node);
 
     let cli_host = build_cli_host()?;
     let mut ctx = new_context(&cli_host);
     let vm = CanonicalVm::new(cli_host);
 
     let expr = kitnode_to_expr(&node)?;
-    eprintln!("DEBUG Expr: {:#?}", expr);
     let value = vm.eval(&expr, &mut ctx).map_err(|e| {
         PlatformError::Plugin(format!("evaluation error: {e:?}"))
     })?;
