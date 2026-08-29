@@ -1,4 +1,4 @@
-use handl_plugin_applier::DefaultApplierPlugin;
+use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use serde_json::json;
@@ -8,11 +8,7 @@ fn main() -> Result<(), PlatformError> {
     let args = std::env::args().collect::<Vec<_>>();
     let (applier_id, config_path, kit_name, command, command_args) = parse_args(&args)?;
 
-    if applier_id != "applier.default" {
-        return Err(PlatformError::InvalidMetadata(format!("unknown applier: {applier_id}")));
-    }
-
-    host.register_plugin(DefaultApplierPlugin::new(config_path).with_fallback_kit(kit_name));
+    host.register_plugin(BootstrapPlugin::new(config_path, kit_name, applier_id));
     host.register_plugin(BasicCli::new());
     host.load()?;
 
