@@ -1,5 +1,5 @@
 use handl_kit_canonical::{Kit, KitNode, KitValue};
-use handl_platform::{CapabilityRequest, DefaultHost, PlatformError, PluginRegistry};
+use handl_platform::{CallableLookup, CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_vm::{Expr, HandlerClause, Pattern};
@@ -9,7 +9,6 @@ use handl_plugin_vm_values_json::{CanonicalContext, NonFunctionValue};
 use serde_json::json;
 
 fn main() -> Result<(), PlatformError> {
-    let mut host = DefaultHost::new();
     let args = std::env::args().collect::<Vec<_>>();
     let (applier_id, config_path, kit_name, command, command_args) = parse_args(&args)?;
 
@@ -18,16 +17,10 @@ fn main() -> Result<(), PlatformError> {
         return gen_grammar(&kit_name, command_args.first().copied());
     }
 
-    // Handle run command — uses the VM directly, bypassing the plugin system.
-    if command == "run" {
-        return run_file(command_args.first().copied());
-    }
-
-    // Handle eval command — uses the VM directly to evaluate an expression.
-    if command == "eval" {
-        return eval_expression(command_args.first().copied());
-    }
-
+    // Load the kit via the plugin system. This registers ModuleRuntime,
+    // plugin-lib-* (which contribute modules to it), and all language
+    // operations (lexer, parser, formatter, etc.).
+    let mut host = DefaultHost::new();
     host.register_plugin(BootstrapPlugin::new(config_path, kit_name, applier_id));
     host.register_plugin(BasicCli::new());
     host.load()?;
@@ -38,50 +31,60 @@ fn main() -> Result<(), PlatformError> {
         return Err(PlatformError::Plugin(e.to_string()));
     }
 
-    let resp = host.run(&CapabilityRequest {
-        capability: "cli".into(),
-        payload: json!({
-            "command": command,
-            "args": command_args,
-        }),
-    })?;
+    // Dispatch: run/eval use the VM directly with the kit's ModuleRuntime;
+    // other commands go through the capability system.
+    match command {
+        "run" => run_file(command_args.first().copied(), &host),
+        "eval" => eval_expression(command_args.first().copied(), &host),
+        _ => {
+            let resp = host.run(&CapabilityRequest {
+                capability: "cli".into(),
+                payload: json!({
+                    "command": command,
+                    "args": command_args,
+                }),
+            })?;
 
-    if let Some(s) = resp.0.as_str() {
-        println!("{s}");
+            if let Some(s) = resp.0.as_str() {
+                println!("{s}");
+            }
+            Ok(())
+        }
     }
-    Ok(())
 }
 
-fn build_cli_host() -> Result<DynamicRuntime, PlatformError> {
-    let mut registry = PluginRegistry::new();
-    registry.register(ModuleRuntime::new());
-    registry.register(handl_plugin_lib_os_std::LibraryPlugin);
-    registry.register(handl_plugin_lib_utils::LibraryPlugin);
-    registry.register(handl_plugin_lib_collections::LibraryPlugin);
-    registry.register(handl_plugin_lib_json::LibraryPlugin);
-    registry.register(handl_plugin_lib_toml::LibraryPlugin);
-    registry.register(handl_plugin_lib_yaml::LibraryPlugin);
-    let host = DynamicRuntime::from_registry(registry)?;
-    Ok(host.with_max_depth(256).with_max_calls(100_000))
+/// Extracts the ModuleRuntime from the host's plugin registry and wraps it
+/// in a DynamicRuntime with standard resource limits.
+fn build_runtime(host: &DefaultHost) -> Result<DynamicRuntime, PlatformError> {
+    let modules = host
+        .plugins()
+        .get_plugin::<ModuleRuntime>()
+        .cloned()
+        .ok_or_else(|| {
+            PlatformError::Plugin("ModuleRuntime not found in kit's plugin registry".into())
+        })?;
+    Ok(DynamicRuntime::new(modules)
+        .with_max_depth(256)
+        .with_max_calls(100_000))
 }
 
-fn new_context(host: &DynamicRuntime) -> CanonicalContext {
+fn new_context(runtime: &DynamicRuntime) -> CanonicalContext {
     let mut ctx = CanonicalContext::new();
-    if let Some(max) = host.max_depth() {
+    if let Some(max) = runtime.max_depth() {
         ctx.set_max_depth(max);
     }
-    if let Some(max) = host.max_calls() {
+    if let Some(max) = runtime.max_calls() {
         ctx.set_max_calls(max);
     }
     ctx.set_eval(Box::new(CanonicalEval::new(
-        host.clone(),
-        host.max_depth(),
-        host.max_calls(),
+        runtime.clone(),
+        runtime.max_depth(),
+        runtime.max_calls(),
     )));
     ctx
 }
 
-fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
+fn run_file(path: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError> {
     let path = path.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
     })?;
@@ -93,9 +96,9 @@ fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new();
     let stmts = kit.parse_module(&source)?;
 
-    let cli_host = build_cli_host()?;
-    let mut ctx = new_context(&cli_host);
-    let vm = CanonicalVm::new(cli_host);
+    let runtime = build_runtime(host)?;
+    let mut ctx = new_context(&runtime);
+    let vm = CanonicalVm::new(runtime);
 
     let mut last_value = NonFunctionValue::new(serde_json::Value::Null);
 
@@ -117,7 +120,7 @@ fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
     Ok(())
 }
 
-fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
+fn eval_expression(expr: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError> {
     let expr_str = expr.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl eval <expression>".into())
     })?;
@@ -125,9 +128,9 @@ fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new();
     let node = kit.parse(expr_str)?;
 
-    let cli_host = build_cli_host()?;
-    let mut ctx = new_context(&cli_host);
-    let vm = CanonicalVm::new(cli_host);
+    let runtime = build_runtime(host)?;
+    let mut ctx = new_context(&runtime);
+    let vm = CanonicalVm::new(runtime);
 
     let expr = kitnode_to_expr(&node)?;
     let value = vm.eval(&expr, &mut ctx).map_err(|e| {
