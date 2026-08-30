@@ -1,6 +1,6 @@
 use handl_kit_canonical::Kit;
 use handl_platform::{
-    AstNode, CapabilityRequest, DefaultHost, PlatformError,
+    AstNode, BasicEvaluator, CapabilityRequest, DefaultHost, EvalContext, PlatformError,
 };
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
@@ -109,19 +109,37 @@ fn eval_ast_via_plugins(ast: &AstNode, host: &mut DefaultHost) -> Result<Value, 
     Ok(resp.0)
 }
 
-/// Evaluate a sequence of statement [`AstNode`]s through the plugin system,
-/// returning the last statement's value.
+/// Evaluate a sequence of statement [`AstNode`]s with a persistent
+/// [`EvalContext`], returning the last statement's value.
 ///
-/// Each statement is dispatched independently (the `BasicEvaluator` builds a
-/// fresh `EvalContext` per dispatch), so this only succeeds when every
-/// statement is self-contained.
+/// Unlike dispatching each statement independently (which builds a fresh
+/// `EvalContext` per call), this creates one `EvalContext` and evaluates
+/// every statement through it. Bindings made by `let`/`stmt.let` persist
+/// across statements, enabling recursive function definitions and
+/// multi-statement modules.
 fn eval_stmts_via_plugins(
     stmts: &[AstNode],
     host: &mut DefaultHost,
 ) -> Result<Value, PlatformError> {
+    let evaluator = host
+        .plugins_mut()
+        .get_plugin_mut::<BasicEvaluator>()
+        .ok_or_else(|| {
+            PlatformError::InvalidMetadata("BasicEvaluator plugin not registered".into())
+        })?;
+
+    let callback = evaluator.make_callback();
+    let mut ctx = EvalContext::new();
+    ctx.set_evaluator(callback);
+
+    // Wire up module lookup so eval rules can resolve module-qualified calls.
+    if let Some(modules) = host.plugins_mut().module_lookup() {
+        ctx.set_modules(modules);
+    }
+
     let mut last = Value::Null;
     for stmt in stmts {
-        last = eval_ast_via_plugins(stmt, host)?;
+        last = ctx.eval(stmt)?;
     }
     Ok(last)
 }
