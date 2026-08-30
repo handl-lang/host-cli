@@ -1,12 +1,19 @@
 use handl_kit_canonical::{Kit, KitNode, KitValue};
-use handl_platform::{CallableLookup, CapabilityRequest, DefaultHost, PlatformError};
+use handl_platform::{
+    AstNode, CallableLookup, CapabilityRequest, DefaultHost, PlatformError,
+};
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
+// Legacy VM imports — kept as the fallback eval path until the VM layer is
+// deleted in ADR 0040 step 12. The new eval dispatch (`eval_ast_via_plugins`)
+// routes through the host's plugin system; these are only used when that path
+// cannot handle an expression (e.g. module-qualified function calls, which
+// still depend on the legacy `ModuleRuntime` wired into the VM).
 use handl_plugin_vm::{Expr, HandlerClause, Pattern};
 use handl_plugin_vm_backend_rust_interpreter::{CanonicalEval, CanonicalVm};
 use handl_plugin_vm_common::{DynamicRuntime, ModuleRuntime};
 use handl_plugin_vm_values_json::{CanonicalContext, NonFunctionValue};
-use serde_json::json;
+use serde_json::{json, Value};
 
 fn main() -> Result<(), PlatformError> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -31,11 +38,16 @@ fn main() -> Result<(), PlatformError> {
         return Err(PlatformError::Plugin(e.to_string()));
     }
 
-    // Dispatch: run/eval use the VM directly with the kit's ModuleRuntime;
-    // other commands go through the capability system.
+    // Dispatch: run/eval now route through the host's plugin system like
+    // every other operation (ADR 0040), dispatching an `Eval`
+    // `CapabilityRequest` to the `BasicEvaluator` loaded by the kit. They fall
+    // back to the legacy `CanonicalVm` path when the new eval plugins cannot
+    // yet handle an expression (e.g. module-qualified function calls, which
+    // still depend on the legacy `ModuleRuntime`). Other commands go through
+    // the `cli` capability as before.
     match command {
-        "run" => run_file(command_args.first().copied(), &host),
-        "eval" => eval_expression(command_args.first().copied(), &host),
+        "run" => run_file(command_args.first().copied(), &mut host),
+        "eval" => eval_expression(command_args.first().copied(), &mut host),
         _ => {
             let resp = host.run(&CapabilityRequest {
                 capability: "cli".into(),
@@ -84,7 +96,7 @@ fn new_context(runtime: &DynamicRuntime) -> CanonicalContext {
     ctx
 }
 
-fn run_file(path: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError> {
+fn run_file(path: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformError> {
     let path = path.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
     })?;
@@ -94,6 +106,23 @@ fn run_file(path: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError>
     })?;
 
     let kit = Kit::new();
+
+    // New path (ADR 0040): dispatch an `Eval` `CapabilityRequest` per
+    // statement through the host's plugin system. Each statement is
+    // evaluated independently against a fresh `EvalContext` (the
+    // `BasicEvaluator` builds one per dispatch), so this only succeeds for
+    // self-contained statements that the loaded `plugin-eval-*` rules can
+    // handle without cross-statement scope. Multi-statement files with
+    // dependencies, and module-qualified function calls, fall through to
+    // the legacy VM path below.
+    if let Ok(stmts) = kit.parse_module_to_ast(&source) {
+        if let Ok(value) = eval_stmts_via_plugins(&stmts, host) {
+            print_value(&value);
+            return Ok(());
+        }
+    }
+
+    // Fallback: legacy VM-based eval (deleted in ADR 0040 step 12).
     let stmts = kit.parse_module(&source)?;
 
     let runtime = build_runtime(host)?;
@@ -109,23 +138,33 @@ fn run_file(path: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError>
         })?;
     }
 
-    // Print the last expression's value.
-    let inner = last_value.into_inner();
-    if let Some(s) = inner.as_str() {
-        println!("{s}");
-    } else {
-        println!("{}", serde_json::to_string_pretty(&inner).unwrap_or_default());
-    }
-
+    print_value(&last_value.into_inner());
     Ok(())
 }
 
-fn eval_expression(expr: Option<&str>, host: &DefaultHost) -> Result<(), PlatformError> {
+fn eval_expression(expr: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformError> {
     let expr_str = expr.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl eval <expression>".into())
     })?;
 
     let kit = Kit::new();
+
+    // New path (ADR 0040): dispatch an `Eval` `CapabilityRequest` through
+    // the host's plugin system, exactly like typecheck/lint/format. The
+    // `BasicEvaluator` (loaded by the kit) finds the matching
+    // `Behavior<Eval>` rule for the parsed `AstNode.kind` and produces a
+    // `serde_json::Value`.
+    if let Ok(ast) = kit.parse_to_ast(expr_str) {
+        if let Ok(value) = eval_ast_via_plugins(&ast, host) {
+            print_value(&value);
+            return Ok(());
+        }
+    }
+
+    // Fallback: legacy VM-based eval (deleted in ADR 0040 step 12). This is
+    // still reached for expressions the new eval plugins cannot yet handle,
+    // e.g. `hello.greet("world")` (module-qualified function calls depend on
+    // the legacy `ModuleRuntime` wired into the VM).
     let node = kit.parse(expr_str)?;
 
     let runtime = build_runtime(host)?;
@@ -137,14 +176,65 @@ fn eval_expression(expr: Option<&str>, host: &DefaultHost) -> Result<(), Platfor
         PlatformError::Plugin(format!("evaluation error: {e:?}"))
     })?;
 
-    let inner = value.into_inner();
-    if let Some(s) = inner.as_str() {
-        println!("{s}");
+    print_value(&value.into_inner());
+    Ok(())
+}
+
+/// Dispatch an `Eval` `CapabilityRequest` for a single [`AstNode`] through the
+/// host's plugin system.
+///
+/// The `BasicEvaluator` plugin (registered by the kit) handles the `"eval"`
+/// capability: it reads `payload["kind"]` as the AST kind and treats the rest
+/// of `payload` as the `AstNode.payload`. We merge the kind into the node's
+/// payload so the evaluator can route to the matching `Behavior<Eval>` rule.
+///
+/// Returns the evaluated `serde_json::Value` on success, or an error when no
+/// rule matches (e.g. unsupported kind) or a rule fails (e.g. unbound
+/// variable, unknown function). Callers fall back to the legacy VM path on
+/// error.
+fn eval_ast_via_plugins(ast: &AstNode, host: &mut DefaultHost) -> Result<Value, PlatformError> {
+    let mut payload = ast.payload.clone();
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("kind".into(), json!(ast.kind));
     } else {
-        println!("{}", serde_json::to_string_pretty(&inner).unwrap_or_default());
+        // Payload isn't an object — wrap it so the evaluator still sees a
+        // `kind`. (All real AST payloads are objects; this is defensive.)
+        payload = json!({ "kind": ast.kind, "value": payload });
     }
 
-    Ok(())
+    let resp = host.run(&CapabilityRequest {
+        capability: "eval".into(),
+        payload,
+    })?;
+    Ok(resp.0)
+}
+
+/// Evaluate a sequence of statement [`AstNode`]s through the plugin system,
+/// returning the last statement's value.
+///
+/// Each statement is dispatched independently (the `BasicEvaluator` builds a
+/// fresh `EvalContext` per dispatch), so this only succeeds when every
+/// statement is self-contained. Any failure aborts and the caller falls back
+/// to the legacy VM path, which carries scope across statements.
+fn eval_stmts_via_plugins(
+    stmts: &[AstNode],
+    host: &mut DefaultHost,
+) -> Result<Value, PlatformError> {
+    let mut last = Value::Null;
+    for stmt in stmts {
+        last = eval_ast_via_plugins(stmt, host)?;
+    }
+    Ok(last)
+}
+
+/// Print a `serde_json::Value` the way the CLI presents eval results: bare
+/// strings are printed without quotes, everything else as pretty-printed JSON.
+fn print_value(value: &Value) {
+    if let Some(s) = value.as_str() {
+        println!("{s}");
+    } else {
+        println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+    }
 }
 
 fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformError> {
@@ -170,7 +260,7 @@ fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformErr
             Box::new(kitnode_to_expr(&p.right)?),
         ),
         KitNode::Array(a) => Expr::Array(a.elements.iter().map(kitnode_to_expr).collect::<Result<Vec<_>, _>>()?),
-        KitNode::Object(o) => Expr::Object(o.entries.iter().map(|(k, v)| Ok((k.clone(), kitnode_to_expr(v)?))).collect::<Result<Vec<_>, _>>()?),
+        KitNode::Object(o) => Expr::Object(o.entries.iter().map(|(k, v)| Ok::<_, PlatformError>((k.clone(), kitnode_to_expr(v)?))).collect::<Result<Vec<_>, _>>()?),
         KitNode::Let(l) => Expr::Assign {
             target: Pattern::Identifier(l.name.clone()),
             value: Box::new(kitnode_to_expr(&l.value)?),
