@@ -1,18 +1,9 @@
-use handl_kit_canonical::{Kit, KitNode, KitValue};
+use handl_kit_canonical::Kit;
 use handl_platform::{
-    AstNode, CallableLookup, CapabilityRequest, DefaultHost, PlatformError,
+    AstNode, CapabilityRequest, DefaultHost, PlatformError,
 };
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
-// Legacy VM imports — kept as the fallback eval path until the VM layer is
-// deleted in ADR 0040 step 12. The new eval dispatch (`eval_ast_via_plugins`)
-// routes through the host's plugin system; these are only used when that path
-// cannot handle an expression (e.g. module-qualified function calls, which
-// still depend on the legacy `ModuleRuntime` wired into the VM).
-use handl_plugin_vm::{Expr, HandlerClause, Pattern};
-use handl_plugin_vm_backend_rust_interpreter::{CanonicalEval, CanonicalVm};
-use handl_plugin_vm_common::{DynamicRuntime, ModuleRuntime};
-use handl_plugin_vm_values_json::{CanonicalContext, NonFunctionValue};
 use serde_json::{json, Value};
 
 fn main() -> Result<(), PlatformError> {
@@ -38,13 +29,10 @@ fn main() -> Result<(), PlatformError> {
         return Err(PlatformError::Plugin(e.to_string()));
     }
 
-    // Dispatch: run/eval now route through the host's plugin system like
+    // Dispatch: run/eval route through the host's plugin system like
     // every other operation (ADR 0040), dispatching an `Eval`
-    // `CapabilityRequest` to the `BasicEvaluator` loaded by the kit. They fall
-    // back to the legacy `CanonicalVm` path when the new eval plugins cannot
-    // yet handle an expression (e.g. module-qualified function calls, which
-    // still depend on the legacy `ModuleRuntime`). Other commands go through
-    // the `cli` capability as before.
+    // `CapabilityRequest` to the `BasicEvaluator` loaded by the kit.
+    // Other commands go through the `cli` capability as before.
     match command {
         "run" => run_file(command_args.first().copied(), &mut host),
         "eval" => eval_expression(command_args.first().copied(), &mut host),
@@ -65,37 +53,6 @@ fn main() -> Result<(), PlatformError> {
     }
 }
 
-/// Extracts the ModuleRuntime from the host's plugin registry and wraps it
-/// in a DynamicRuntime with standard resource limits.
-fn build_runtime(host: &DefaultHost) -> Result<DynamicRuntime, PlatformError> {
-    let modules = host
-        .plugins()
-        .get_plugin::<ModuleRuntime>()
-        .cloned()
-        .ok_or_else(|| {
-            PlatformError::Plugin("ModuleRuntime not found in kit's plugin registry".into())
-        })?;
-    Ok(DynamicRuntime::new(modules)
-        .with_max_depth(256)
-        .with_max_calls(100_000))
-}
-
-fn new_context(runtime: &DynamicRuntime) -> CanonicalContext {
-    let mut ctx = CanonicalContext::new();
-    if let Some(max) = runtime.max_depth() {
-        ctx.set_max_depth(max);
-    }
-    if let Some(max) = runtime.max_calls() {
-        ctx.set_max_calls(max);
-    }
-    ctx.set_eval(Box::new(CanonicalEval::new(
-        runtime.clone(),
-        runtime.max_depth(),
-        runtime.max_calls(),
-    )));
-    ctx
-}
-
 fn run_file(path: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformError> {
     let path = path.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
@@ -106,39 +63,9 @@ fn run_file(path: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformEr
     })?;
 
     let kit = Kit::new();
-
-    // New path (ADR 0040): dispatch an `Eval` `CapabilityRequest` per
-    // statement through the host's plugin system. Each statement is
-    // evaluated independently against a fresh `EvalContext` (the
-    // `BasicEvaluator` builds one per dispatch), so this only succeeds for
-    // self-contained statements that the loaded `plugin-eval-*` rules can
-    // handle without cross-statement scope. Multi-statement files with
-    // dependencies, and module-qualified function calls, fall through to
-    // the legacy VM path below.
-    if let Ok(stmts) = kit.parse_module_to_ast(&source) {
-        if let Ok(value) = eval_stmts_via_plugins(&stmts, host) {
-            print_value(&value);
-            return Ok(());
-        }
-    }
-
-    // Fallback: legacy VM-based eval (deleted in ADR 0040 step 12).
-    let stmts = kit.parse_module(&source)?;
-
-    let runtime = build_runtime(host)?;
-    let mut ctx = new_context(&runtime);
-    let vm = CanonicalVm::new(runtime);
-
-    let mut last_value = NonFunctionValue::new(serde_json::Value::Null);
-
-    for stmt in &stmts {
-        let expr = kitnode_to_expr(stmt)?;
-        last_value = vm.eval(&expr, &mut ctx).map_err(|e| {
-            PlatformError::Plugin(format!("evaluation error: {e:?}"))
-        })?;
-    }
-
-    print_value(&last_value.into_inner());
+    let stmts = kit.parse_module_to_ast(&source)?;
+    let value = eval_stmts_via_plugins(&stmts, host)?;
+    print_value(&value);
     Ok(())
 }
 
@@ -148,35 +75,9 @@ fn eval_expression(expr: Option<&str>, host: &mut DefaultHost) -> Result<(), Pla
     })?;
 
     let kit = Kit::new();
-
-    // New path (ADR 0040): dispatch an `Eval` `CapabilityRequest` through
-    // the host's plugin system, exactly like typecheck/lint/format. The
-    // `BasicEvaluator` (loaded by the kit) finds the matching
-    // `Behavior<Eval>` rule for the parsed `AstNode.kind` and produces a
-    // `serde_json::Value`.
-    if let Ok(ast) = kit.parse_to_ast(expr_str) {
-        if let Ok(value) = eval_ast_via_plugins(&ast, host) {
-            print_value(&value);
-            return Ok(());
-        }
-    }
-
-    // Fallback: legacy VM-based eval (deleted in ADR 0040 step 12). This is
-    // still reached for expressions the new eval plugins cannot yet handle,
-    // e.g. `hello.greet("world")` (module-qualified function calls depend on
-    // the legacy `ModuleRuntime` wired into the VM).
-    let node = kit.parse(expr_str)?;
-
-    let runtime = build_runtime(host)?;
-    let mut ctx = new_context(&runtime);
-    let vm = CanonicalVm::new(runtime);
-
-    let expr = kitnode_to_expr(&node)?;
-    let value = vm.eval(&expr, &mut ctx).map_err(|e| {
-        PlatformError::Plugin(format!("evaluation error: {e:?}"))
-    })?;
-
-    print_value(&value.into_inner());
+    let ast = kit.parse_to_ast(expr_str)?;
+    let value = eval_ast_via_plugins(&ast, host)?;
+    print_value(&value);
     Ok(())
 }
 
@@ -190,8 +91,7 @@ fn eval_expression(expr: Option<&str>, host: &mut DefaultHost) -> Result<(), Pla
 ///
 /// Returns the evaluated `serde_json::Value` on success, or an error when no
 /// rule matches (e.g. unsupported kind) or a rule fails (e.g. unbound
-/// variable, unknown function). Callers fall back to the legacy VM path on
-/// error.
+/// variable, unknown function).
 fn eval_ast_via_plugins(ast: &AstNode, host: &mut DefaultHost) -> Result<Value, PlatformError> {
     let mut payload = ast.payload.clone();
     if let Some(obj) = payload.as_object_mut() {
@@ -214,8 +114,7 @@ fn eval_ast_via_plugins(ast: &AstNode, host: &mut DefaultHost) -> Result<Value, 
 ///
 /// Each statement is dispatched independently (the `BasicEvaluator` builds a
 /// fresh `EvalContext` per dispatch), so this only succeeds when every
-/// statement is self-contained. Any failure aborts and the caller falls back
-/// to the legacy VM path, which carries scope across statements.
+/// statement is self-contained.
 fn eval_stmts_via_plugins(
     stmts: &[AstNode],
     host: &mut DefaultHost,
@@ -235,133 +134,6 @@ fn print_value(value: &Value) {
     } else {
         println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
     }
-}
-
-fn kitnode_to_expr(node: &KitNode) -> Result<Expr<NonFunctionValue>, PlatformError> {
-    Ok(match node {
-        KitNode::Literal(v) => Expr::Value(kitvalue_to_nonfunction(v)),
-        KitNode::Var(v) => Expr::Var(v.name.clone()),
-        KitNode::Call(c) => Expr::call(c.name.clone(), c.args.iter().map(kitnode_to_expr).collect::<Result<Vec<_>, _>>()?),
-        KitNode::Apply(a) => Expr::Apply {
-            target: Box::new(kitnode_to_expr(&a.target)?),
-            args: a.args.iter().map(kitnode_to_expr).collect::<Result<Vec<_>, _>>()?,
-        },
-        KitNode::Index(i) => {
-            let target = Box::new(kitnode_to_expr(&i.target)?);
-            match &i.index {
-                KitNode::Literal(KitValue::String(s)) => {
-                    Expr::FieldAccess { target, field: s.clone() }
-                }
-                _ => Expr::Index { target, index: Box::new(kitnode_to_expr(&i.index)?) },
-            }
-        },
-        KitNode::Pipe(p) => Expr::Pipe(
-            Box::new(kitnode_to_expr(&p.left)?),
-            Box::new(kitnode_to_expr(&p.right)?),
-        ),
-        KitNode::Array(a) => Expr::Array(a.elements.iter().map(kitnode_to_expr).collect::<Result<Vec<_>, _>>()?),
-        KitNode::Object(o) => Expr::Object(o.entries.iter().map(|(k, v)| Ok::<_, PlatformError>((k.clone(), kitnode_to_expr(v)?))).collect::<Result<Vec<_>, _>>()?),
-        KitNode::Let(l) => Expr::Assign {
-            target: Pattern::Identifier(l.name.clone()),
-            value: Box::new(kitnode_to_expr(&l.value)?),
-        },
-        KitNode::Const(l) => Expr::Assign {
-            target: Pattern::Identifier(l.name.clone()),
-            value: Box::new(kitnode_to_expr(&l.value)?),
-        },
-        KitNode::Assign(a) => Expr::Assign {
-            target: kitnode_to_pattern(&a.target)?,
-            value: Box::new(kitnode_to_expr(&a.value)?),
-        },
-        KitNode::Block(a) => {
-            // Evaluate all statements in sequence, return last.
-            // For simplicity, wrap as a sequence of assigns.
-            if a.elements.is_empty() {
-                Expr::Value(NonFunctionValue::new(serde_json::Value::Null))
-            } else {
-                let mut result = kitnode_to_expr(&a.elements[0])?;
-                for elem in &a.elements[1..] {
-                    let _ = kitnode_to_expr(elem)?;
-                    result = kitnode_to_expr(elem)?;
-                }
-                result
-            }
-        }
-        KitNode::Match(m) => Expr::Match {
-            subject: Box::new(kitnode_to_expr(&m.subject)?),
-            arms: m.arms.iter().map(|arm| {
-                match &arm.pattern {
-                    KitNode::Literal(_) => {
-                        let pattern_expr = kitnode_to_expr(&arm.pattern)
-                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null)));
-                        let guard = Expr::call("cmp.eq", vec![
-                            Expr::Var("__match_subject".into()),
-                            pattern_expr,
-                        ]);
-                        let orig_guard = arm.guard.as_ref().map(|g| kitnode_to_expr(g)
-                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Bool(true)))));
-                        let combined_guard = if let Some(og) = orig_guard {
-                            Expr::call("bool.and", vec![guard, og])
-                        } else {
-                            guard
-                        };
-                        (Pattern::Identifier("__match_subject".into()), Some(combined_guard),
-                         kitnode_to_expr(&arm.body).unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null))))
-                    }
-                    _ => {
-                        let pattern = kitnode_to_pattern(&arm.pattern)
-                            .unwrap_or(Pattern::Identifier("_".into()));
-                        let guard = arm.guard.as_ref().map(|g| kitnode_to_expr(g)
-                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Bool(true)))));
-                        let body = kitnode_to_expr(&arm.body)
-                            .unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null)));
-                        (pattern, guard, body)
-                    }
-                }
-            }).collect(),
-        },
-        KitNode::Handle(h) => Expr::Handle {
-            body: Box::new(kitnode_to_expr(&h.expr)?),
-            handlers: h.handlers.iter().map(|handler| {
-                HandlerClause {
-                    op_name: handler.op_name.clone(),
-                    params: handler.params.clone(),
-                    continuation_name: handler.continuation_name.clone(),
-                    body: kitnode_to_expr(&handler.body).unwrap_or(Expr::Value(NonFunctionValue::new(serde_json::Value::Null))),
-                }
-            }).collect(),
-        },
-        KitNode::Function(f) => Expr::Function {
-            type_params: Vec::new(),
-            params: f.params.iter().map(|p| (Pattern::Identifier(p.clone()), None)).collect(),
-            ret: None,
-            body: Box::new(kitnode_to_expr(&f.body)?),
-        },
-        KitNode::Import(_) | KitNode::Export(_) | KitNode::Module(_) => {
-            // Skip declarations at the VM level for now.
-            Expr::Value(NonFunctionValue::new(serde_json::Value::Null))
-        }
-    })
-}
-
-fn kitnode_to_pattern(node: &KitNode) -> Result<Pattern, PlatformError> {
-    Ok(match node {
-        KitNode::Var(v) if v.name == "_" => Pattern::Identifier("_".into()),
-        KitNode::Var(v) => Pattern::Identifier(v.name.clone()),
-        KitNode::Literal(KitValue::Null) => Pattern::Identifier("_".into()),
-        _ => return Err(PlatformError::Plugin(format!(
-            "unsupported pattern node: {node:?}"
-        ))),
-    })
-}
-
-fn kitvalue_to_nonfunction(v: &KitValue) -> NonFunctionValue {
-    NonFunctionValue::new(match v {
-        KitValue::Null => serde_json::Value::Null,
-        KitValue::Number(n) => serde_json::json!(n),
-        KitValue::String(s) => serde_json::json!(s),
-        KitValue::Bool(b) => serde_json::json!(b),
-    })
 }
 
 fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), PlatformError> {
