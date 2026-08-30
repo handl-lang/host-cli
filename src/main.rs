@@ -1,7 +1,6 @@
 use handl_kit_canonical::Kit;
-use handl_platform::{
-    AstNode, BasicEvaluator, CapabilityRequest, DefaultHost, EvalContext, PlatformError,
-};
+use handl_language::LangError;
+use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use serde_json::{json, Value};
@@ -29,13 +28,11 @@ fn main() -> Result<(), PlatformError> {
         return Err(PlatformError::Plugin(e.to_string()));
     }
 
-    // Dispatch: run/eval route through the host's plugin system like
-    // every other operation (ADR 0040), dispatching an `Eval`
-    // `CapabilityRequest` to the `BasicEvaluator` loaded by the kit.
+    // Dispatch: run/eval use the data-driven Kit directly (ADR 0044).
     // Other commands go through the `cli` capability as before.
     match command {
-        "run" => run_file(command_args.first().copied(), &mut host),
-        "eval" => eval_expression(command_args.first().copied(), &mut host),
+        "run" => run_file(command_args.first().copied()),
+        "eval" => eval_expression(command_args.first().copied()),
         _ => {
             let resp = host.run(&CapabilityRequest {
                 capability: "cli".into(),
@@ -53,7 +50,7 @@ fn main() -> Result<(), PlatformError> {
     }
 }
 
-fn run_file(path: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformError> {
+fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
     let path = path.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
     })?;
@@ -62,86 +59,26 @@ fn run_file(path: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformEr
         PlatformError::InvalidMetadata(format!("failed to read {path}: {e}"))
     })?;
 
-    let kit = Kit::new();
-    let stmts = kit.parse_module_to_ast(&source)?;
-    let value = eval_stmts_via_plugins(&stmts, host)?;
+    let kit = Kit::new().map_err(lang_to_platform)?;
+    let value = kit.run(&source).map_err(lang_to_platform)?;
     print_value(&value);
     Ok(())
 }
 
-fn eval_expression(expr: Option<&str>, host: &mut DefaultHost) -> Result<(), PlatformError> {
+fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
     let expr_str = expr.ok_or_else(|| {
         PlatformError::InvalidMetadata("usage: hnl eval <expression>".into())
     })?;
 
-    let kit = Kit::new();
-    let ast = kit.parse_to_ast(expr_str)?;
-    let value = eval_ast_via_plugins(&ast, host)?;
+    let kit = Kit::new().map_err(lang_to_platform)?;
+    let value = kit.eval(expr_str).map_err(lang_to_platform)?;
     print_value(&value);
     Ok(())
 }
 
-/// Dispatch an `Eval` `CapabilityRequest` for a single [`AstNode`] through the
-/// host's plugin system.
-///
-/// The `BasicEvaluator` plugin (registered by the kit) handles the `"eval"`
-/// capability: it reads `payload["kind"]` as the AST kind and treats the rest
-/// of `payload` as the `AstNode.payload`. We merge the kind into the node's
-/// payload so the evaluator can route to the matching `Behavior<Eval>` rule.
-///
-/// Returns the evaluated `serde_json::Value` on success, or an error when no
-/// rule matches (e.g. unsupported kind) or a rule fails (e.g. unbound
-/// variable, unknown function).
-fn eval_ast_via_plugins(ast: &AstNode, host: &mut DefaultHost) -> Result<Value, PlatformError> {
-    let mut payload = ast.payload.clone();
-    if let Some(obj) = payload.as_object_mut() {
-        obj.insert("kind".into(), json!(ast.kind));
-    } else {
-        // Payload isn't an object — wrap it so the evaluator still sees a
-        // `kind`. (All real AST payloads are objects; this is defensive.)
-        payload = json!({ "kind": ast.kind, "value": payload });
-    }
-
-    let resp = host.run(&CapabilityRequest {
-        capability: "eval".into(),
-        payload,
-    })?;
-    Ok(resp.0)
-}
-
-/// Evaluate a sequence of statement [`AstNode`]s with a persistent
-/// [`EvalContext`], returning the last statement's value.
-///
-/// Unlike dispatching each statement independently (which builds a fresh
-/// `EvalContext` per call), this creates one `EvalContext` and evaluates
-/// every statement through it. Bindings made by `let`/`stmt.let` persist
-/// across statements, enabling recursive function definitions and
-/// multi-statement modules.
-fn eval_stmts_via_plugins(
-    stmts: &[AstNode],
-    host: &mut DefaultHost,
-) -> Result<Value, PlatformError> {
-    let evaluator = host
-        .plugins_mut()
-        .get_plugin_mut::<BasicEvaluator>()
-        .ok_or_else(|| {
-            PlatformError::InvalidMetadata("BasicEvaluator plugin not registered".into())
-        })?;
-
-    let callback = evaluator.make_callback();
-    let mut ctx = EvalContext::new();
-    ctx.set_evaluator(callback);
-
-    // Wire up module lookup so eval rules can resolve module-qualified calls.
-    if let Some(modules) = host.plugins_mut().module_lookup() {
-        ctx.set_modules(modules);
-    }
-
-    let mut last = Value::Null;
-    for stmt in stmts {
-        last = ctx.eval(stmt)?;
-    }
-    Ok(last)
+/// Convert a [`LangError`] to a [`PlatformError`].
+fn lang_to_platform(e: LangError) -> PlatformError {
+    PlatformError::Plugin(e.to_string())
 }
 
 /// Print a `serde_json::Value` the way the CLI presents eval results: bare
@@ -155,8 +92,11 @@ fn print_value(value: &Value) {
 }
 
 fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), PlatformError> {
-    let kit = Kit::new();
-    let rules = kit.grammar_rules();
+    let kit = Kit::new().map_err(lang_to_platform)?;
+    // Grammar rules are no longer collected from the legacy token factories.
+    // The data-driven textmate emitter will provide rule data in a future
+    // extension; for now we emit an empty grammar skeleton.
+    let rules: Vec<handl_host_tooling::GrammarRule> = Vec::new();
     let grammar = handl_host_tooling::generate_textmate(
         &rules,
         kit.scope_name(),
