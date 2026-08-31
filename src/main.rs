@@ -3,7 +3,7 @@ use handl_language::LangError;
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn main() -> Result<(), PlatformError> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -51,13 +51,11 @@ fn main() -> Result<(), PlatformError> {
 }
 
 fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
-    let path = path.ok_or_else(|| {
-        PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into())
-    })?;
+    let path =
+        path.ok_or_else(|| PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into()))?;
 
-    let source = std::fs::read_to_string(path).map_err(|e| {
-        PlatformError::InvalidMetadata(format!("failed to read {path}: {e}"))
-    })?;
+    let source = std::fs::read_to_string(path)
+        .map_err(|e| PlatformError::InvalidMetadata(format!("failed to read {path}: {e}")))?;
 
     let kit = Kit::new().map_err(lang_to_platform)?;
     let value = kit.run(&source).map_err(lang_to_platform)?;
@@ -66,9 +64,8 @@ fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
 }
 
 fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
-    let expr_str = expr.ok_or_else(|| {
-        PlatformError::InvalidMetadata("usage: hnl eval <expression>".into())
-    })?;
+    let expr_str =
+        expr.ok_or_else(|| PlatformError::InvalidMetadata("usage: hnl eval <expression>".into()))?;
 
     let kit = Kit::new().map_err(lang_to_platform)?;
     let value = kit.eval(expr_str).map_err(lang_to_platform)?;
@@ -87,7 +84,10 @@ fn print_value(value: &Value) {
     if let Some(s) = value.as_str() {
         println!("{s}");
     } else {
-        println!("{}", serde_json::to_string_pretty(value).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(value).unwrap_or_default()
+        );
     }
 }
 
@@ -97,11 +97,8 @@ fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), Platfor
     // The data-driven textmate emitter will provide rule data in a future
     // extension; for now we emit an empty grammar skeleton.
     let rules: Vec<handl_host_tooling::GrammarRule> = Vec::new();
-    let grammar = handl_host_tooling::generate_textmate(
-        &rules,
-        kit.scope_name(),
-        &kit.file_extensions(),
-    );
+    let grammar =
+        handl_host_tooling::generate_textmate(&rules, kit.scope_name(), &kit.file_extensions());
 
     let json = serde_json::to_string_pretty(&grammar)
         .map_err(|e| PlatformError::InvalidMetadata(e.to_string()))?;
