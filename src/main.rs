@@ -214,11 +214,34 @@ fn format_tokens(tokens: &[handl_language::Token]) -> String {
             continue;
         }
 
-        // Keywords that take a space after them.
+        // Keywords: `if`/`then`/`else`/`in`/`match`/`loop`/`proc`/...
         let is_keyword = token.kind.starts_with("token.keyword.");
         if is_keyword {
+            // `else` begins a new line in an if-chain
+            // (`if c then a \n else if c2 then b \n else c`).
+            if text == "else" {
+                out.push('\n');
+                out.push_str(&"  ".repeat(indent));
+                out.push_str("else ");
+                continue;
+            }
+            // Leading space before a keyword when it follows a value or a
+            // closing delimiter (e.g. `n == 0 then`, `} in`, `y in`). Without
+            // this, `kthen` would lex as a single identifier.
+            if let Some(last) = out.chars().last() {
+                if last != ' ' && last != '\n' && last != '(' && last != '[' && last != '{' {
+                    out.push(' ');
+                }
+            }
             out.push_str(text);
-            out.push(' ');
+            // `in` ends a bind clause; break to a new line so chained
+            // bindings (`x = y in \n body`) read top-to-bottom.
+            if text == "in" {
+                out.push('\n');
+                at_line_start = true;
+            } else {
+                out.push(' ');
+            }
             continue;
         }
 
