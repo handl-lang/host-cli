@@ -38,6 +38,7 @@ fn main() -> Result<(), PlatformError> {
     match command {
         "run" => run_file(command_args.first().copied()),
         "eval" => eval_expression(command_args.first().copied()),
+        "typecheck" => typecheck_expression(command_args.first().copied()),
         _ => {
             let resp = host.run(&CapabilityRequest {
                 capability: "cli".into(),
@@ -75,6 +76,17 @@ fn eval_expression(expr: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new().map_err(lang_to_platform)?;
     let value = kit.eval(expr_str).map_err(lang_to_platform)?;
     print_value(&value);
+    Ok(())
+}
+
+fn typecheck_expression(expr: Option<&str>) -> Result<(), PlatformError> {
+    let expr_str = expr.ok_or_else(|| {
+        PlatformError::InvalidMetadata("usage: hnl typecheck <expression>".into())
+    })?;
+
+    let kit = Kit::new().map_err(lang_to_platform)?;
+    let typ = kit.typecheck(expr_str).map_err(lang_to_platform)?;
+    print_value(&typ);
     Ok(())
 }
 
