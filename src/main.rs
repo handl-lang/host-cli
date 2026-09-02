@@ -226,7 +226,7 @@ fn format_tokens(tokens: &[handl_language::Token]) -> String {
             continue;
         }
 
-        // Keywords: `if`/`then`/`else`/`in`/`match`/`loop`/`proc`/...
+        // Keywords: `if`/`then`/`else`/`in`/`match`/`loop`/...
         let is_keyword = token.kind.starts_with("token.keyword.");
         if is_keyword {
             // `else` begins a new line in an if-chain
@@ -273,7 +273,7 @@ fn format_tokens(tokens: &[handl_language::Token]) -> String {
         }
 
         // Arrow: emit + space.
-        if text == "->" {
+        if text == "~>" {
             out.push(' ');
             out.push_str(text);
             out.push(' ');

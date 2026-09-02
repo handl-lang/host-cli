@@ -61,7 +61,7 @@ fn typecheck_let_e2e() {
 
 #[test]
 fn typecheck_fn_e2e() {
-    let (ok, out) = run_typecheck("(x) -> x");
+    let (ok, out) = run_typecheck("x ~> x");
     assert!(ok, "expected success, got: {out}");
     assert!(out.contains("type.function"), "expected type.function, got: {out}");
 }
