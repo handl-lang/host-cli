@@ -427,10 +427,11 @@ fn print_value(value: &Value) {
 
 fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), PlatformError> {
     let kit = Kit::new().map_err(lang_to_platform)?;
-    // Grammar rules are no longer collected from the legacy token factories.
-    // The data-driven textmate emitter will provide rule data in a future
-    // extension; for now we emit an empty grammar skeleton.
-    let rules: Vec<handl_host_tooling::GrammarRule> = Vec::new();
+    // Derive TextMate grammar rules from the data-driven language definition
+    // (ADR-0044). The lexer rules and token kinds in the assembled Language
+    // are converted into GrammarRules by host-tooling's
+    // `grammar_rules_from_language`.
+    let rules = handl_host_tooling::grammar_rules_from_language(kit.runtime().lang());
     let grammar =
         handl_host_tooling::generate_textmate(&rules, kit.scope_name(), &kit.file_extensions());
 
