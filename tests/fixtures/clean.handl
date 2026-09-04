@@ -1,0 +1,2 @@
+-- A clean, canonical module exercising the v0.1 surface.
+double = x ~> x * 2
