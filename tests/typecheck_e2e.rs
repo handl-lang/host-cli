@@ -53,8 +53,8 @@ fn typecheck_if_non_bool_cond_errors_e2e() {
 }
 
 #[test]
-fn typecheck_let_e2e() {
-    let (ok, out) = run_typecheck("let x = 1 in x");
+fn typecheck_graph_block_e2e() {
+    let (ok, out) = run_typecheck("do { x = 1; x }");
     assert!(ok, "expected success, got: {out}");
     assert!(out.contains("type.number"), "expected type.number, got: {out}");
 }
@@ -87,14 +87,14 @@ fn typecheck_type_annot_mismatch_errors_e2e() {
 }
 
 #[test]
-fn typecheck_let_with_annotation_e2e() {
-    let (ok, out) = run_typecheck("let x: type.number = 2 in x");
+fn typecheck_graph_block_with_annotation_e2e() {
+    let (ok, out) = run_typecheck("do { x: type.number = 2; x }");
     assert!(ok, "expected success, got: {out}");
     assert!(out.contains("type.number"), "expected type.number, got: {out}");
 }
 
 #[test]
-fn typecheck_let_annotation_mismatch_errors_e2e() {
-    let (ok, out) = run_typecheck("let x: type.string = 2 in x");
+fn typecheck_graph_block_annotation_mismatch_errors_e2e() {
+    let (ok, out) = run_typecheck("do { x: type.string = 2; x }");
     assert!(!ok, "expected error, got: {out}");
 }
