@@ -20,12 +20,9 @@ fn find_example_cdylib() -> Option<PathBuf> {
     }
 
     let candidates: &[&str] = &[
-        "libnative_plugin_example.so",
-        "libhandl-plugin-target-native-example.so",
-        "libnative_plugin_example.dylib",
-        "libhandl-plugin-target-native-example.dylib",
-        "native_plugin_example.dll",
-        "handl-plugin-target-native-example.dll",
+        "libhandl_plugin_loader_native_fixture_echo.so",
+        "libhandl_plugin_loader_native_fixture_echo.dylib",
+        "handl_plugin_loader_native_fixture_echo.dll",
     ];
 
     for name in candidates {
@@ -41,13 +38,13 @@ fn find_example_cdylib() -> Option<PathBuf> {
 #[test]
 fn cli_loads_native_plugin_and_runs_echo() {
     let Some(cdylib) = find_example_cdylib() else {
-        eprintln!("handl-plugin-target-native-example cdylib not found; skipping integration test");
+        eprintln!("native-echo fixture cdylib not found; skipping integration test");
         return;
     };
 
     let manifest = format!(
         r#"{{
-  "id": "handl-plugin-target-native-example",
+  "id": "handl-plugin-loader-native-fixture-echo",
   "version": "0.1.0",
   "provides": ["echo"],
   "requires": [],
