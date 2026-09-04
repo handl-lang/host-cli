@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 fn main() -> Result<(), PlatformError> {
     let args = std::env::args().collect::<Vec<_>>();
-    let (applier_id, config_path, kit_name, command, command_args) = parse_args(&args)?;
+    let (applier_id, config_path, kit_name, command, command_args, engine) = parse_args(&args)?;
 
     // Handle gen-grammar before loading the plugin host — it only needs the kit.
     if command == "gen-grammar" {
@@ -36,7 +36,7 @@ fn main() -> Result<(), PlatformError> {
     // Dispatch: run/eval use the data-driven Kit directly (ADR 0044).
     // Other commands go through the `cli` capability as before.
     match command {
-        "run" => run_file(command_args.first().copied()),
+        "run" => run_file(command_args.first().copied(), engine.as_deref()),
         "eval" => eval_expression(command_args.first().copied()),
         "typecheck" => typecheck_expression(command_args.first().copied()),
         _ => {
@@ -56,14 +56,17 @@ fn main() -> Result<(), PlatformError> {
     }
 }
 
-fn run_file(path: Option<&str>) -> Result<(), PlatformError> {
+fn run_file(path: Option<&str>, engine: Option<&str>) -> Result<(), PlatformError> {
     let path =
         path.ok_or_else(|| PlatformError::InvalidMetadata("usage: hnl run <file.hnl>".into()))?;
 
     let source = std::fs::read_to_string(path)
         .map_err(|e| PlatformError::InvalidMetadata(format!("failed to read {path}: {e}")))?;
 
-    let kit = Kit::new().map_err(lang_to_platform)?;
+    let kit = match engine {
+        Some(name) => Kit::with_eval(name).map_err(lang_to_platform)?,
+        None => Kit::new().map_err(lang_to_platform)?,
+    };
     let value = kit.run(&source).map_err(lang_to_platform)?;
     print_value(&value);
     Ok(())
@@ -452,12 +455,13 @@ fn gen_grammar(_kit_name: &str, output_path: Option<&str>) -> Result<(), Platfor
     Ok(())
 }
 
-fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str>), PlatformError> {
+fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str>, Option<String>), PlatformError> {
     let mut applier_id = "applier.default".to_string();
     let mut config_path = ".handl.toml".to_string();
     let mut kit_name = std::env::var("HANDL_KIT").unwrap_or_else(|_| "hello".to_string());
     let mut command = "";
     let mut command_args = Vec::new();
+    let mut engine: Option<String> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -484,6 +488,14 @@ fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str
                     .ok_or_else(|| PlatformError::InvalidMetadata("missing --kit value".into()))?
                     .to_string();
             }
+            "--engine" => {
+                i += 1;
+                engine = Some(
+                    args.get(i)
+                        .ok_or_else(|| PlatformError::InvalidMetadata("missing --engine value".into()))?
+                        .to_string(),
+                );
+            }
             "--" => {
                 // Separator: following args are the command and its args.
             }
@@ -499,5 +511,5 @@ fn parse_args(args: &[String]) -> Result<(String, String, String, &str, Vec<&str
     if command.is_empty() {
         return Err(PlatformError::InvalidMetadata("missing command".into()));
     }
-    Ok((applier_id, config_path, kit_name, command, command_args))
+    Ok((applier_id, config_path, kit_name, command, command_args, engine))
 }
