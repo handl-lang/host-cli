@@ -13,8 +13,8 @@ which each ship a CLI integration.
 ## Summary
 
 The final CLI is written in handl and has **no built-in tools**. It is a
-thin, generic, documented orchestrator: it discovers and loads *tool
-integrations* contributed by plugins, and dispatches subcommands to them.
+thin, generic, documented orchestrator: it discovers and loads _tool
+integrations_ contributed by plugins, and dispatches subcommands to them.
 The formatter, linter, typechecker, test runner, and LSP integrations are
 written by their respective RFCs as separate plugin modules — the CLI is
 decoupled from all of them.
