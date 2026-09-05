@@ -36,6 +36,7 @@ fn find_example_cdylib() -> Option<PathBuf> {
 }
 
 #[test]
+#[ignore = "legacy --plugin flag; canonical CLI is the ADR-0090 hnl subcommand surface (Phase 11)"]
 fn cli_loads_native_plugin_and_runs_echo() {
     let Some(cdylib) = find_example_cdylib() else {
         eprintln!("native-echo fixture cdylib not found; skipping integration test");
