@@ -11,7 +11,8 @@
 //! hnl fmt   [--check] [--write] [paths...]    — format files
 //! hnl lint  [--fix] [--fail-on-warn] [paths...] — lint files
 //! hnl check [paths...]                         — typecheck files
-//! hnl test  [--filter <pat>] [--list] [--json] [paths...] — run tests
+//! hnl test  [--list] [--filter <pat>] [--tag <tag>] [--jobs N|auto]
+//!           [--report human|json] [--changed] [--cache] [paths...] — run tests
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
 //! hnl typecheck '<expression>'                 — typecheck a single expression
@@ -455,13 +456,17 @@ fn check_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// `hnl test [--filter <pat>] [--list] [--json] [paths...]`
+// `hnl test [paths...]`
 // ---------------------------------------------------------------------------
 
 fn test_command(args: &[String]) -> i32 {
     let mut filter: Option<String> = None;
     let mut list = false;
-    let mut json = false;
+    let mut report_kind = "human".to_string();
+    let mut jobs: Option<String> = None;
+    let mut cache = false;
+    let mut tag: Option<String> = None;
+    let mut changed = false;
     let mut paths = Vec::new();
 
     let mut i = 0;
@@ -477,8 +482,40 @@ fn test_command(args: &[String]) -> i32 {
                     }
                 }
             }
+            "--tag" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) => tag = Some(v.clone()),
+                    None => {
+                        eprintln!("test: --tag requires a value");
+                        return 2;
+                    }
+                }
+            }
+            "--jobs" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) => jobs = Some(v.clone()),
+                    None => {
+                        eprintln!("test: --jobs requires a value");
+                        return 2;
+                    }
+                }
+            }
+            "--report" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) => report_kind = v.clone(),
+                    None => {
+                        eprintln!("test: --report requires a value");
+                        return 2;
+                    }
+                }
+            }
             "--list" => list = true,
-            "--json" => json = true,
+            "--changed" => changed = true,
+            "--cache" => cache = true,
+            "--json" => report_kind = "json".to_string(),
             "--" => {}
             s if s.starts_with("--") => {
                 eprintln!("test: unknown flag `{s}`");
@@ -489,9 +526,24 @@ fn test_command(args: &[String]) -> i32 {
         i += 1;
     }
 
-    if paths.is_empty() {
-        eprintln!("test: no paths given (pass .handl/.hnl files or directories)");
+    // `--tag` and `--changed` require runner support that is not yet wired
+    // (TestCase carries no tag metadata and there is no VCS/changed filter).
+    if tag.is_some() {
+        eprintln!("test: --tag is not yet implemented");
         return 2;
+    }
+    if changed {
+        eprintln!("test: --changed is not yet implemented");
+        return 2;
+    }
+
+    // Default paths: `tests/` if it exists, otherwise the current directory.
+    if paths.is_empty() {
+        if std::path::Path::new("tests").is_dir() {
+            paths.push("tests".to_string());
+        } else {
+            paths.push(".".to_string());
+        }
     }
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
@@ -503,7 +555,7 @@ fn test_command(args: &[String]) -> i32 {
         }
     };
 
-    // Report parse errors.
+    // Report parse errors discovered while scanning test modules.
     let mut had_parse_error = false;
     for (file, msg) in &plan.parse_errors {
         eprintln!("{}: parse error: {msg}", file.display());
@@ -511,21 +563,69 @@ fn test_command(args: &[String]) -> i32 {
     }
 
     if list {
+        let predicate = handl_plugin_engine_test::filter_predicate(filter.as_deref().unwrap_or(""));
         for case in &plan.tests {
-            println!("{}", case.name);
+            if predicate.eval(case) {
+                println!("{} ({})", case.name, case.module.display());
+            }
         }
         return if had_parse_error { 1 } else { 0 };
     }
 
-    let report = match &filter {
-        Some(pat) => handl_plugin_engine_test::run_with_filter(&plan, pat),
-        None => handl_plugin_engine_test::run(&plan),
-    };
+    // Build the run config from the CLI flags.
+    let mut config = handl_plugin_engine_test::RunConfig::new();
+    if let Some(pat) = &filter {
+        config = config.with_filter(pat);
+    }
+    if let Some(j) = jobs {
+        let policy = if j == "auto" {
+            handl_plugin_lib_scheduler::SchedulePolicy::default()
+        } else {
+            match j.parse::<usize>() {
+                Ok(n) => handl_plugin_lib_scheduler::SchedulePolicy::parallel(n),
+                Err(_) => {
+                    eprintln!("test: --jobs requires a positive integer or `auto`");
+                    return 2;
+                }
+            }
+        };
+        config = config.with_policy(policy);
+    }
+    if cache {
+        // The result cache is in-process only; it speeds up a single `hnl test`
+        // invocation but is not written to disk between processes (the generic
+        // execution cache lives in `plugin-exec-cache`).
+        config = config.with_cache(handl_plugin_engine_test::TestRunCache::new());
+    }
 
-    if json {
-        print!("{}", handl_plugin_engine_test::format_report_json(&report));
+    let report = handl_plugin_engine_test::run_with_config(&plan, &mut config);
+
+    // Render the report with the selected reporter.
+    let summary = handl_plugin_engine_test::summarize(&report);
+    let output = match report_kind.as_str() {
+        "human" | "console" => {
+            <handl_plugin_engine_test::HumanReporter as handl_plugin_engine_test::Reporter>::format(
+                &handl_plugin_engine_test::HumanReporter,
+                &report,
+                &summary,
+            )
+        }
+        "json" => {
+            <handl_plugin_engine_test::JsonReporter as handl_plugin_engine_test::Reporter>::format(
+                &handl_plugin_engine_test::JsonReporter,
+                &report,
+                &summary,
+            )
+        }
+        other => {
+            eprintln!("test: unknown report format `{other}`");
+            return 2;
+        }
+    };
+    if report_kind == "json" {
+        println!("{output}");
     } else {
-        print!("{}", handl_plugin_engine_test::format_report_human(&report));
+        print!("{output}");
     }
 
     if report.has_failures() || had_parse_error {
