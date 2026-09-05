@@ -495,7 +495,7 @@ fn test_command(args: &[String]) -> i32 {
     }
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let plan = match handl_plugin_lib_test::discover(&path_bufs) {
+    let plan = match handl_plugin_engine_test::discover(&path_bufs) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("test: discovery error: {e}");
@@ -518,14 +518,14 @@ fn test_command(args: &[String]) -> i32 {
     }
 
     let report = match &filter {
-        Some(pat) => handl_plugin_lib_test::run_with_filter(&plan, pat),
-        None => handl_plugin_lib_test::run(&plan),
+        Some(pat) => handl_plugin_engine_test::run_with_filter(&plan, pat),
+        None => handl_plugin_engine_test::run(&plan),
     };
 
     if json {
-        print!("{}", handl_plugin_lib_test::format_report_json(&report));
+        print!("{}", handl_plugin_engine_test::format_report_json(&report));
     } else {
-        print!("{}", handl_plugin_lib_test::format_report_human(&report));
+        print!("{}", handl_plugin_engine_test::format_report_human(&report));
     }
 
     if report.has_failures() || had_parse_error {
