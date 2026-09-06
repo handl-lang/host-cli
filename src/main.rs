@@ -763,7 +763,7 @@ fn eval_expression(expr: Option<&str>) -> i32 {
 
     // The Pratt parser handles one top-level statement per call; wrap the
     // user expression in a `do` block so semicolon-separated commands such as
-    // `from "comb" import * as comb; comb.map(...)` evaluate as a sequence.
+    // `from "transform" import * as transform; transform.map(...)` evaluate as a sequence.
     let wrapped = format!("do {{ {} }}", expr);
     match kit.eval(&wrapped) {
         Ok(value) => {
