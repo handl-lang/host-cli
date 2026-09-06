@@ -1,4 +1,4 @@
 -- A module with mixed pass and fail tests.
-test_pass = 42
-test_fail = assert false
-test_pass_two = 1 + 1
+test_pass :: 42
+test_fail :: assert false
+test_pass_two :: 1 + 1
