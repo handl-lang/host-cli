@@ -24,10 +24,7 @@ fn fixture(name: &str) -> PathBuf {
 /// Run `hnl` with the given args, returning (exit code, stdout, stderr).
 fn run_hnl(args: &[&str]) -> (i32, String, String) {
     let bin = env::var("CARGO_BIN_EXE_hnl").expect("CARGO_BIN_EXE_hnl");
-    let output = Command::new(&bin)
-        .args(args)
-        .output()
-        .expect("run hnl");
+    let output = Command::new(&bin).args(args).output().expect("run hnl");
     (
         output.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&output.stdout).to_string(),
@@ -52,22 +49,34 @@ fn copy_fixture_to_temp(name: &str) -> PathBuf {
 fn fmt_check_clean() {
     let path = fixture("clean.handl");
     let (code, stdout, stderr) = run_hnl(&["fmt", "--check", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
 }
 
 #[test]
 fn fmt_check_dirty() {
     let path = fixture("dirty.handl");
     let (code, stdout, stderr) = run_hnl(&["fmt", "--check", path.to_str().unwrap()]);
-    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}");
-    assert!(stdout.contains("not canonical"), "expected 'not canonical', got: {stdout}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("not canonical"),
+        "expected 'not canonical', got: {stdout}"
+    );
 }
 
 #[test]
 fn fmt_write() {
     let path = copy_fixture_to_temp("dirty.handl");
     let (code, stdout, stderr) = run_hnl(&["fmt", "--write", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     let after = fs::read_to_string(&path).expect("read after write");
     assert!(
         after.contains("x * 2"),
@@ -82,7 +91,10 @@ fn fmt_write() {
 fn fmt_stdout() {
     let path = fixture("dirty.handl");
     let (code, stdout, stderr) = run_hnl(&["fmt", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(
         stdout.contains("x * 2"),
         "expected formatted output with spaces, got: {stdout}"
@@ -98,14 +110,20 @@ fn lint_clean() {
     let path = fixture("clean.handl");
     let (code, stdout, stderr) = run_hnl(&["lint", path.to_str().unwrap()]);
     // No Error diagnostics → exit 0 (warnings/info are non-fatal).
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
 }
 
 #[test]
 fn lint_with_errors() {
     let path = fixture("unbound.handl");
     let (code, stdout, stderr) = run_hnl(&["lint", path.to_str().unwrap()]);
-    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(
         stdout.contains("error") && stdout.contains("unbound-wire"),
         "expected error diagnostic, got: {stdout}"
@@ -116,7 +134,10 @@ fn lint_with_errors() {
 fn lint_fix() {
     let path = copy_fixture_to_temp("dirty.handl");
     let (code, stdout, stderr) = run_hnl(&["lint", "--fix", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     let after = fs::read_to_string(&path).expect("read after fix");
     assert!(
         after.contains("x * 2"),
@@ -127,10 +148,12 @@ fn lint_fix() {
 #[test]
 fn lint_fail_on_warn() {
     let path = fixture("dirty.handl");
-    let (code, stdout, stderr) =
-        run_hnl(&["lint", "--fail-on-warn", path.to_str().unwrap()]);
+    let (code, stdout, stderr) = run_hnl(&["lint", "--fail-on-warn", path.to_str().unwrap()]);
     // dirty.handl has a `fmt` warning → --fail-on-warn makes it exit 1.
-    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(
         stdout.contains("warning"),
         "expected a warning diagnostic, got: {stdout}"
@@ -145,14 +168,20 @@ fn lint_fail_on_warn() {
 fn check_clean() {
     let path = fixture("clean.handl");
     let (code, stdout, stderr) = run_hnl(&["check", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
 }
 
 #[test]
 fn check_with_errors() {
     let path = fixture("unbound.handl");
     let (code, stdout, stderr) = run_hnl(&["check", path.to_str().unwrap()]);
-    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(
         stdout.contains("error") && stdout.contains("unbound"),
         "expected error diagnostic, got: {stdout}"
@@ -167,7 +196,10 @@ fn check_with_errors() {
 fn test_pass() {
     let path = fixture("test_pass.handl");
     let (code, stdout, stderr) = run_hnl(&["test", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(stdout.contains("PASS"), "expected PASS, got: {stdout}");
 }
 
@@ -175,7 +207,10 @@ fn test_pass() {
 fn test_fail() {
     let path = fixture("test_fail.handl");
     let (code, stdout, stderr) = run_hnl(&["test", path.to_str().unwrap()]);
-    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(stdout.contains("FAIL"), "expected FAIL, got: {stdout}");
 }
 
@@ -183,23 +218,31 @@ fn test_fail() {
 fn test_list() {
     let path = fixture("test_pass.handl");
     let (code, stdout, stderr) = run_hnl(&["test", "--list", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(
         stdout.contains("test_addition"),
         "expected test name in listing, got: {stdout}"
     );
     // --list should not print PASS/FAIL summary lines.
-    assert!(!stdout.contains("PASS"), "listing should not run tests: {stdout}");
+    assert!(
+        !stdout.contains("PASS"),
+        "listing should not run tests: {stdout}"
+    );
 }
 
 #[test]
 fn test_json() {
     let path = fixture("test_pass.handl");
     let (code, stdout, stderr) = run_hnl(&["test", "--json", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     // Must be valid JSON (parseable).
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("valid JSON output");
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid JSON output");
     assert!(parsed.is_object(), "expected JSON object, got: {parsed}");
 }
 
@@ -209,8 +252,14 @@ fn test_filter() {
     let (code, stdout, stderr) =
         run_hnl(&["test", "--filter", "test_pass", path.to_str().unwrap()]);
     // test_pass and test_pass_two match; test_fail is skipped → no failures.
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
-    assert!(stdout.contains("SKIP"), "expected SKIP for filtered-out tests: {stdout}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stdout.contains("SKIP"),
+        "expected SKIP for filtered-out tests: {stdout}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -221,14 +270,20 @@ fn test_filter() {
 fn run_file() {
     let path = fixture("run_expr.handl");
     let (code, stdout, stderr) = run_hnl(&["run", path.to_str().unwrap()]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(stdout.contains("2"), "expected result 2, got: {stdout}");
 }
 
 #[test]
 fn eval_expr() {
     let (code, stdout, stderr) = run_hnl(&["eval", "1 + 2"]);
-    assert_eq!(code, 0, "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
     assert!(stdout.contains("3"), "expected result 3, got: {stdout}");
 }
 

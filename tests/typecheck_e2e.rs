@@ -10,11 +10,7 @@ fn run_typecheck(expr: &str) -> (bool, String) {
         .expect("run hnl");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = if stdout.is_empty() {
-        stderr
-    } else {
-        stdout
-    };
+    let combined = if stdout.is_empty() { stderr } else { stdout };
     (output.status.success(), combined)
 }
 
@@ -22,14 +18,20 @@ fn run_typecheck(expr: &str) -> (bool, String) {
 fn typecheck_number_e2e() {
     let (ok, out) = run_typecheck("42");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
 fn typecheck_arithmetic_e2e() {
     let (ok, out) = run_typecheck("1 + 2");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
@@ -43,7 +45,10 @@ fn typecheck_bool_e2e() {
 fn typecheck_if_e2e() {
     let (ok, out) = run_typecheck("if true then 1 else 2");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
@@ -56,28 +61,40 @@ fn typecheck_if_non_bool_cond_errors_e2e() {
 fn typecheck_graph_block_e2e() {
     let (ok, out) = run_typecheck("do { x = 1; x }");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
 fn typecheck_fn_e2e() {
     let (ok, out) = run_typecheck("x ~> x");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.function"), "expected type.function, got: {out}");
+    assert!(
+        out.contains("type.function"),
+        "expected type.function, got: {out}"
+    );
 }
 
 #[test]
 fn typecheck_match_e2e() {
     let (ok, out) = run_typecheck("match 1 { 1: 2, _: 3 }");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
 fn typecheck_type_annot_e2e() {
     let (ok, out) = run_typecheck("2: type.number");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]
@@ -90,7 +107,10 @@ fn typecheck_type_annot_mismatch_errors_e2e() {
 fn typecheck_graph_block_with_annotation_e2e() {
     let (ok, out) = run_typecheck("do { x: type.number = 2; x }");
     assert!(ok, "expected success, got: {out}");
-    assert!(out.contains("type.number"), "expected type.number, got: {out}");
+    assert!(
+        out.contains("type.number"),
+        "expected type.number, got: {out}"
+    );
 }
 
 #[test]

@@ -10,11 +10,7 @@ fn run_eval(expr: &str) -> (bool, String) {
         .expect("run hnl");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = if stdout.is_empty() {
-        stderr
-    } else {
-        stdout
-    };
+    let combined = if stdout.is_empty() { stderr } else { stdout };
     (output.status.success(), combined)
 }
 

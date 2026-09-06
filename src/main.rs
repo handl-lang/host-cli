@@ -11,7 +11,7 @@
 //! hnl fmt   [--check] [--write] [paths...]    — format files
 //! hnl lint  [--fix] [--fail-on-warn] [paths...] — lint files
 //! hnl check [paths...]                         — typecheck files
-//! hnl test  [--list] [--filter <pat>] [--tag <tag>] [--jobs N|auto]
+//! hnl test  [--list] [--filter <pat>] [--tag <expr>] [--jobs N|auto]
 //!           [--report human|json] [--changed] [--cache] [paths...] — run tests
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
 //! hnl run   <file.handl> [-- <args...>]        — run a file
@@ -551,14 +551,13 @@ fn test_command(args: &[String]) -> i32 {
         had_parse_error = true;
     }
 
-    // Compose the selection predicate: name filter AND every requested tag.
-    // A `--tag` value may itself be comma-separated; all listed tags must
-    // match (AND semantics).
+    // Compose the selection predicate: name filter AND every `--tag`
+    // expression. Each `--tag` value is a tag expression — `a,b` selects
+    // tests tagged `a` OR `b`, `!a` selects tests NOT tagged `a` — and
+    // repeated `--tag` flags AND together.
     let mut predicate = handl_plugin_engine_test::filter_predicate(filter.as_deref().unwrap_or(""));
-    for raw_tag in &tags {
-        for tag in raw_tag.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            predicate = predicate.and(handl_plugin_engine_test::tag_predicate(tag));
-        }
+    for expr in &tags {
+        predicate = predicate.and(handl_plugin_engine_test::tag_expr_predicate(expr));
     }
 
     if list {
@@ -762,7 +761,11 @@ fn eval_expression(expr: Option<&str>) -> i32 {
         }
     };
 
-    match kit.eval(expr) {
+    // The Pratt parser handles one top-level statement per call; wrap the
+    // user expression in a `do` block so semicolon-separated commands such as
+    // `from "comb" import * as comb; comb.map(...)` evaluate as a sequence.
+    let wrapped = format!("do {{ {} }}", expr);
+    match kit.eval(&wrapped) {
         Ok(value) => {
             print_value(&value);
             0
