@@ -161,13 +161,13 @@ fn lint_fail_on_warn() {
 }
 
 // ---------------------------------------------------------------------------
-// check
+// typecheck
 // ---------------------------------------------------------------------------
 
 #[test]
 fn check_clean() {
     let path = fixture("clean.handl");
-    let (code, stdout, stderr) = run_hnl(&["check", path.to_str().unwrap()]);
+    let (code, stdout, stderr) = run_hnl(&["typecheck", path.to_str().unwrap()]);
     assert_eq!(
         code, 0,
         "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
@@ -177,7 +177,7 @@ fn check_clean() {
 #[test]
 fn check_with_errors() {
     let path = fixture("unbound.handl");
-    let (code, stdout, stderr) = run_hnl(&["check", path.to_str().unwrap()]);
+    let (code, stdout, stderr) = run_hnl(&["typecheck", path.to_str().unwrap()]);
     assert_eq!(
         code, 1,
         "expected exit 1, got {code}\nstdout: {stdout}\nstderr: {stderr}"
@@ -308,7 +308,7 @@ fn exit_code_fmt_check_failure() {
 #[test]
 fn exit_code_parse_error() {
     let path = fixture("parse_error.handl");
-    let (code, _stdout, stderr) = run_hnl(&["check", path.to_str().unwrap()]);
+    let (code, _stdout, stderr) = run_hnl(&["typecheck", path.to_str().unwrap()]);
     assert_eq!(code, 2, "parse error should exit 2, got {code}");
     assert!(!stderr.is_empty(), "expected parse error message on stderr");
 }

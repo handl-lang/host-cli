@@ -10,13 +10,12 @@
 //! ```text
 //! hnl fmt   [--check] [--write] [paths...]    — format files
 //! hnl lint  [--fix] [--fail-on-warn] [paths...] — lint files
-//! hnl check [paths...]                         — typecheck files
+//! hnl typecheck [paths...]                     — typecheck files
 //! hnl test  [--list] [--filter <pat>] [--tag <expr>] [--jobs N|auto]
 //!           [--report human|json] [--changed] [--cache] [paths...] — run tests
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
-//! hnl typecheck '<expression>'                 — typecheck a single expression
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
 //! ```
 //!
@@ -139,7 +138,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     if command.is_empty() {
-        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, check, test, run, eval, typecheck, gen-grammar".into());
+        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck, test, run, eval, gen-grammar".into());
     }
     Ok(ParsedArgs {
         applier_id,
@@ -168,11 +167,10 @@ fn dispatch(p: ParsedArgs) -> i32 {
     match command.as_str() {
         "fmt" => fmt_command(&command_args),
         "lint" => lint_command(&command_args),
-        "check" => check_command(&command_args),
+        "typecheck" => typecheck_command(&command_args),
         "test" => test_command(&command_args),
         "run" => run_file(command_args.first().map(String::as_str), engine.as_deref()),
         "eval" => eval_expression(command_args.first().map(String::as_str)),
-        "typecheck" => typecheck_expression(command_args.first().map(String::as_str)),
         "gen-grammar" => gen_grammar(&kit_name, command_args.first().map(String::as_str)),
         // Unknown commands go through the `cli` capability dispatch.
         _ => cli_dispatch(
@@ -371,16 +369,16 @@ fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &
 }
 
 // ---------------------------------------------------------------------------
-// `hnl check [paths...]`
+// `hnl typecheck [paths...]`
 // ---------------------------------------------------------------------------
 
-fn check_command(args: &[String]) -> i32 {
+fn typecheck_command(args: &[String]) -> i32 {
     let mut paths = Vec::new();
     for arg in args {
         match arg.as_str() {
             "--" => {}
             s if s.starts_with("--") => {
-                eprintln!("check: unknown flag `{s}`");
+                eprintln!("typecheck: unknown flag `{s}`");
                 return 2;
             }
             s => paths.push(s.to_string()),
@@ -392,21 +390,21 @@ fn check_command(args: &[String]) -> i32 {
     if paths.is_empty() {
         let mut src = String::new();
         if std::io::stdin().read_to_string(&mut src).is_err() {
-            eprintln!("check: failed to read stdin");
+            eprintln!("typecheck: failed to read stdin");
             return 2;
         }
-        return check_one(&src, "<stdin>", &mut had_failure);
+        return typecheck_one(&src, "<stdin>", &mut had_failure);
     }
 
     for path in &paths {
         let src = match std::fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("check: failed to read {path}: {e}");
+                eprintln!("typecheck: failed to read {path}: {e}");
                 return 2;
             }
         };
-        let code = check_one(&src, path, &mut had_failure);
+        let code = typecheck_one(&src, path, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -417,7 +415,7 @@ fn check_command(args: &[String]) -> i32 {
 
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
 /// for Error diagnostics.
-fn check_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
+fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
     let report = match handl_plugin_engine_typecheck::check_module(src) {
         Ok(r) => r,
         Err(err) => {
@@ -772,39 +770,6 @@ fn eval_expression(expr: Option<&str>) -> i32 {
         }
         Err(e) => {
             eprintln!("eval: {e}");
-            1
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// `hnl typecheck <expr>` (single-expression typecheck, legacy)
-// ---------------------------------------------------------------------------
-
-fn typecheck_expression(expr: Option<&str>) -> i32 {
-    let expr = match expr {
-        Some(e) => e,
-        None => {
-            eprintln!("usage: hnl typecheck <expression>");
-            return 2;
-        }
-    };
-
-    let kit = match Kit::new() {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("typecheck: {e}");
-            return 1;
-        }
-    };
-
-    match kit.typecheck(expr) {
-        Ok(typ) => {
-            print_value(&typ);
-            0
-        }
-        Err(e) => {
-            eprintln!("typecheck: {e}");
             1
         }
     }
