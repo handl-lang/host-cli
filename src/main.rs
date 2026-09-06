@@ -13,6 +13,7 @@
 //! hnl check [paths...]                         — typecheck files
 //! hnl test  [--list] [--filter <pat>] [--tag <tag>] [--jobs N|auto]
 //!           [--report human|json] [--changed] [--cache] [paths...] — run tests
+//!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
 //! hnl typecheck '<expression>'                 — typecheck a single expression
@@ -33,9 +34,9 @@ use std::path::{Path, PathBuf};
 use handl_kit_canonical::Kit;
 use handl_language::LangError;
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
-use handl_plugin_applier::BootstrapPlugin;
+use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
-use handl_plugin_ext_diag::{render_diagnostic, render_diagnostics, Severity};
+use handl_plugin_ext_diag::{Severity, render_diagnostic, render_diagnostics};
 use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
@@ -83,8 +84,7 @@ struct ParsedArgs {
 fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut applier_id = "applier.default".to_string();
     let mut config_path = ".handl.toml".to_string();
-    let mut kit_name =
-        std::env::var("HANDL_KIT").unwrap_or_else(|_| "hello".to_string());
+    let mut kit_name = std::env::var("HANDL_KIT").unwrap_or_else(|_| "hello".to_string());
     let mut command = String::new();
     let mut command_args = Vec::new();
     let mut engine: Option<String> = None;
@@ -238,11 +238,7 @@ fn fmt_command(args: &[String]) -> i32 {
         }
     }
 
-    if had_failure {
-        1
-    } else {
-        0
-    }
+    if had_failure { 1 } else { 0 }
 }
 
 /// Format a single source. Returns 2 on parse error (and sets `had_failure`
@@ -331,22 +327,12 @@ fn lint_command(args: &[String]) -> i32 {
         }
     }
 
-    if had_failure {
-        1
-    } else {
-        0
-    }
+    if had_failure { 1 } else { 0 }
 }
 
 /// Lint a single source. Returns 2 on parse error; sets `had_failure` for
 /// Error diagnostics (or Warning when `fail_on_warn`).
-fn lint_one(
-    src: &str,
-    path: &str,
-    fix: bool,
-    fail_on_warn: bool,
-    had_failure: &mut bool,
-) -> i32 {
+fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &mut bool) -> i32 {
     let diags = match handl_plugin_ext_lint::lint_source(src) {
         Ok(d) => d,
         Err(err) => {
@@ -426,11 +412,7 @@ fn check_command(args: &[String]) -> i32 {
         }
     }
 
-    if had_failure {
-        1
-    } else {
-        0
-    }
+    if had_failure { 1 } else { 0 }
 }
 
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
@@ -449,7 +431,11 @@ fn check_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
         println!("{rendered}");
     }
 
-    if report.diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    if report
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+    {
         *had_failure = true;
     }
     0
@@ -465,7 +451,7 @@ fn test_command(args: &[String]) -> i32 {
     let mut report_kind = "human".to_string();
     let mut jobs: Option<String> = None;
     let mut cache = false;
-    let mut tag: Option<String> = None;
+    let mut tags: Vec<String> = Vec::new();
     let mut changed = false;
     let mut paths = Vec::new();
 
@@ -485,7 +471,7 @@ fn test_command(args: &[String]) -> i32 {
             "--tag" => {
                 i += 1;
                 match args.get(i) {
-                    Some(v) => tag = Some(v.clone()),
+                    Some(v) => tags.push(v.clone()),
                     None => {
                         eprintln!("test: --tag requires a value");
                         return 2;
@@ -526,17 +512,6 @@ fn test_command(args: &[String]) -> i32 {
         i += 1;
     }
 
-    // `--tag` and `--changed` require runner support that is not yet wired
-    // (TestCase carries no tag metadata and there is no VCS/changed filter).
-    if tag.is_some() {
-        eprintln!("test: --tag is not yet implemented");
-        return 2;
-    }
-    if changed {
-        eprintln!("test: --changed is not yet implemented");
-        return 2;
-    }
-
     // Default paths: `tests/` if it exists, otherwise the current directory.
     if paths.is_empty() {
         if std::path::Path::new("tests").is_dir() {
@@ -547,11 +522,25 @@ fn test_command(args: &[String]) -> i32 {
     }
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let plan = match handl_plugin_engine_test::discover(&path_bufs) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("test: discovery error: {e}");
-            return 2;
+
+    // Discover with the filesystem provider by default, or the git-changed
+    // provider when `--changed` is requested.
+    let plan = if changed {
+        let provider = handl_plugin_engine_test::ChangedProvider;
+        match handl_plugin_engine_test::discover_with(&provider, &path_bufs, None) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("test: discovery error: {e}");
+                return 2;
+            }
+        }
+    } else {
+        match handl_plugin_engine_test::discover(&path_bufs) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("test: discovery error: {e}");
+                return 2;
+            }
         }
     };
 
@@ -562,8 +551,17 @@ fn test_command(args: &[String]) -> i32 {
         had_parse_error = true;
     }
 
+    // Compose the selection predicate: name filter AND every requested tag.
+    // A `--tag` value may itself be comma-separated; all listed tags must
+    // match (AND semantics).
+    let mut predicate = handl_plugin_engine_test::filter_predicate(filter.as_deref().unwrap_or(""));
+    for raw_tag in &tags {
+        for tag in raw_tag.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            predicate = predicate.and(handl_plugin_engine_test::tag_predicate(tag));
+        }
+    }
+
     if list {
-        let predicate = handl_plugin_engine_test::filter_predicate(filter.as_deref().unwrap_or(""));
         for case in &plan.tests {
             if predicate.eval(case) {
                 println!("{} ({})", case.name, case.module.display());
@@ -574,9 +572,7 @@ fn test_command(args: &[String]) -> i32 {
 
     // Build the run config from the CLI flags.
     let mut config = handl_plugin_engine_test::RunConfig::new();
-    if let Some(pat) = &filter {
-        config = config.with_filter(pat);
-    }
+    config.predicate = predicate;
     if let Some(j) = jobs {
         let policy = if j == "auto" {
             handl_plugin_lib_scheduler::SchedulePolicy::default()
@@ -591,14 +587,40 @@ fn test_command(args: &[String]) -> i32 {
         };
         config = config.with_policy(policy);
     }
+
+    // Disk-persisted result cache (ADR-0089). The cache lives at
+    // `.handl/cache/test-runner/cache.json` under the working directory.
+    let cache_path = PathBuf::from(".handl/cache/test-runner/cache.json");
     if cache {
-        // The result cache is in-process only; it speeds up a single `hnl test`
-        // invocation but is not written to disk between processes (the generic
-        // execution cache lives in `plugin-exec-cache`).
-        config = config.with_cache(handl_plugin_engine_test::TestRunCache::new());
+        let cache = if cache_path.exists() {
+            match handl_plugin_engine_test::TestRunCache::load(&cache_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!(
+                        "test: warning: failed to load cache at {}: {e}",
+                        cache_path.display()
+                    );
+                    handl_plugin_engine_test::TestRunCache::new()
+                }
+            }
+        } else {
+            handl_plugin_engine_test::TestRunCache::new()
+        };
+        config = config.with_cache(cache);
     }
 
     let report = handl_plugin_engine_test::run_with_config(&plan, &mut config);
+
+    if cache {
+        if let Some(cache) = config.cache.as_ref() {
+            if let Err(e) = cache.save(&cache_path) {
+                eprintln!(
+                    "test: warning: failed to save cache at {}: {e}",
+                    cache_path.display()
+                );
+            }
+        }
+    }
 
     // Render the report with the selected reporter.
     let summary = handl_plugin_engine_test::summarize(&report);
@@ -633,6 +655,40 @@ fn test_command(args: &[String]) -> i32 {
     } else {
         0
     }
+}
+
+// ---------------------------------------------------------------------------
+// Import declaration stripping for `hnl run`
+// ---------------------------------------------------------------------------
+
+/// Remove top-level `from ... import ...` and `import ...` declaration lines.
+///
+/// A `.hnl` file is a module with import declarations at the top; the body to
+/// evaluate is what remains (cf. `dedent.hnl`).
+fn strip_import_declarations(src: &str) -> String {
+    src.lines()
+        .filter(|line| !is_import_line(line.trim_start()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn is_import_line(trimmed: &str) -> bool {
+    if let Some(rest) = trimmed.strip_prefix("import") {
+        if rest.is_empty()
+            || rest.starts_with(' ')
+            || rest.starts_with('\t')
+            || rest.starts_with('"')
+            || rest.starts_with('\'')
+        {
+            return true;
+        }
+    }
+    if let Some(rest) = trimmed.strip_prefix("from") {
+        if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
+            return true;
+        }
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -673,7 +729,7 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         },
     };
 
-    match kit.run(&source) {
+    match kit.eval(&strip_import_declarations(&source)) {
         Ok(value) => {
             print_value(&value);
             0
@@ -765,11 +821,8 @@ fn gen_grammar(kit_name: &str, output_path: Option<&str>) -> i32 {
     };
     let _ = kit_name;
     let rules = handl_host_tooling::grammar_rules_from_language(kit.runtime().lang());
-    let grammar = handl_host_tooling::generate_textmate(
-        &rules,
-        kit.scope_name(),
-        &kit.file_extensions(),
-    );
+    let grammar =
+        handl_host_tooling::generate_textmate(&rules, kit.scope_name(), &kit.file_extensions());
 
     let json = match serde_json::to_string_pretty(&grammar) {
         Ok(s) => s,
@@ -852,10 +905,7 @@ fn cli_dispatch(
 fn write_atomic(path: &str, content: &str) -> std::io::Result<()> {
     let target = Path::new(path);
     let dir = target.parent().unwrap_or_else(|| Path::new("."));
-    let tmp = dir.join(format!(
-        ".hnl-fmt-tmp-{}",
-        std::process::id()
-    ));
+    let tmp = dir.join(format!(".hnl-fmt-tmp-{}", std::process::id()));
     std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, target)?;
     Ok(())
