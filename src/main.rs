@@ -17,6 +17,8 @@
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
 //! hnl typecheck '<expression>'                 — typecheck a single expression
+//! hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace]
+//!           [--stats] [--emit tree|json]       — run a transform pass (ADR-0094)
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
 //! ```
 //!
@@ -139,7 +141,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     if command.is_empty() {
-        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, check, test, run, eval, typecheck, gen-grammar".into());
+        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, check, test, run, eval, typecheck, transform, gen-grammar".into());
     }
     Ok(ParsedArgs {
         applier_id,
@@ -173,6 +175,7 @@ fn dispatch(p: ParsedArgs) -> i32 {
         "run" => run_file(command_args.first().map(String::as_str), engine.as_deref()),
         "eval" => eval_expression(command_args.first().map(String::as_str)),
         "typecheck" => typecheck_expression(command_args.first().map(String::as_str)),
+        "transform" => transform_command(&command_args),
         "gen-grammar" => gen_grammar(&kit_name, command_args.first().map(String::as_str)),
         // Unknown commands go through the `cli` capability dispatch.
         _ => cli_dispatch(
@@ -806,6 +809,431 @@ fn typecheck_expression(expr: Option<&str>) -> i32 {
         Err(e) => {
             eprintln!("typecheck: {e}");
             1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `hnl transform <pass> <file> [--pipeline a,b,c] [--plan] [--trace] [--stats] [--emit tree|json]`
+// ---------------------------------------------------------------------------
+//
+// Runs a named transform pass (ADR-0094) over the RAW, pre-desugar AST.
+// `Runtime::parse` applies the `desugar` pass at parse time (ADR-0082), so
+// this command parses via `lex` + `PrattEngine` directly — the same raw-parse
+// path the bootstrap typechecker uses — then runs the pass through
+// `RewriteEngine` with `with_desugar_natives` so `TransformRule::Native` rules
+// (and the `desugar.*` native fallback table) resolve.
+//
+// Pass validation: a pass is known iff `lang.transforms` declares at least
+// one rule for it (or it is `"desugar"`, which also has the native fallback
+// table). An unknown pass is a **usage error** (exit 2) — a misspelled pass
+// name should not silently succeed. A known pass that simply matches no
+// nodes exits 0 with empty output (valid: the pass ran, nothing fired).
+
+/// Parsed `hnl transform` arguments.
+struct TransformArgs {
+    /// The pass name (first positional) — ignored when `pipeline` is set.
+    pass: Option<String>,
+    /// The input file (second positional).
+    file: Option<String>,
+    /// `--pipeline a,b,c`: ordered pass list (overrides `pass`).
+    pipeline: Option<Vec<String>>,
+    /// `--plan`: report match sites without applying.
+    plan: bool,
+    /// `--trace`: print each rewrite.
+    trace: bool,
+    /// `--stats`: print `PassStats`.
+    stats: bool,
+    /// `--emit tree|json` (default `tree`).
+    emit: String,
+}
+
+fn transform_command(args: &[String]) -> i32 {
+    let mut t = TransformArgs {
+        pass: None,
+        file: None,
+        pipeline: None,
+        plan: false,
+        trace: false,
+        stats: false,
+        emit: "tree".to_string(),
+    };
+
+    let mut positional: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--pipeline" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) => {
+                        t.pipeline = Some(
+                            v.split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect(),
+                        )
+                    }
+                    None => {
+                        eprintln!("transform: --pipeline requires a comma-separated value");
+                        return 2;
+                    }
+                }
+            }
+            "--emit" => {
+                i += 1;
+                match args.get(i) {
+                    Some(v) => t.emit = v.clone(),
+                    None => {
+                        eprintln!("transform: --emit requires a value (tree|json)");
+                        return 2;
+                    }
+                }
+            }
+            "--plan" => t.plan = true,
+            "--trace" => t.trace = true,
+            "--stats" => t.stats = true,
+            "--" => {}
+            s if s.starts_with("--") => {
+                eprintln!("transform: unknown flag `{s}`");
+                return 2;
+            }
+            s => positional.push(s.to_string()),
+        }
+        i += 1;
+    }
+
+    // Positionals: `<pass> <file>`. When `--pipeline` is given, the pass
+    // positional is optional — the last positional is always the file.
+    if t.pipeline.is_some() {
+        t.file = positional.pop();
+        t.pass = positional.pop();
+        if !positional.is_empty() {
+            eprintln!("transform: too many positional arguments");
+            return 2;
+        }
+    } else {
+        let mut it = positional.into_iter();
+        t.pass = it.next();
+        t.file = it.next();
+        if it.next().is_some() {
+            eprintln!("transform: too many positional arguments");
+            return 2;
+        }
+    }
+
+    if t.emit != "tree" && t.emit != "json" {
+        eprintln!(
+            "transform: unknown emit format `{}` (expected tree|json)",
+            t.emit
+        );
+        return 2;
+    }
+
+    let file = match &t.file {
+        Some(f) => f.clone(),
+        None => {
+            eprintln!(
+                "usage: hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace] [--stats] [--emit tree|json]"
+            );
+            return 2;
+        }
+    };
+    if t.pass.is_none() && t.pipeline.is_none() {
+        eprintln!("transform: missing <pass> (or --pipeline)");
+        return 2;
+    }
+
+    let src = match std::fs::read_to_string(&file) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("transform: failed to read {file}: {e}");
+            return 2;
+        }
+    };
+
+    let kit = match Kit::new() {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("transform: {e}");
+            return 1;
+        }
+    };
+    let lang = kit.runtime().lang();
+
+    // Validate the requested pass(es): every pass must declare at least one
+    // rule in `lang.transforms`. `"desugar"` additionally has the native
+    // fallback table, but it always has declarative rules too.
+    let passes: Vec<String> = match &t.pipeline {
+        Some(ps) => ps.clone(),
+        None => vec![t.pass.clone().unwrap()],
+    };
+    for p in &passes {
+        if !lang.transforms.iter().any(|d| d.pass == *p) {
+            let mut known: Vec<String> = lang
+                .transforms
+                .iter()
+                .map(|d| d.pass.clone())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            known.sort();
+            eprintln!(
+                "transform: unknown pass `{p}` (known passes: {})",
+                known.join(", ")
+            );
+            return 2;
+        }
+    }
+
+    // Raw-parse each top-level statement (split at bracket-depth zero, the
+    // same convention as the typechecker/linter/test runner) — no desugar.
+    let stmts = match transform_parse_raw(lang, &src) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("transform: {file}: parse error: {e}");
+            return 2;
+        }
+    };
+
+    let engine = handl_plugin_engine_transform_rewrite::RewriteEngine::new().with_desugar_natives();
+
+    if t.plan {
+        // Match-only: report match sites + rule ids without rewriting.
+        let mut count = 0usize;
+        for (n, ast) in stmts.iter().enumerate() {
+            let root = handl_language::AstRef::new(ast.len() - 1);
+            let sites: Vec<_> = passes
+                .iter()
+                .flat_map(|p| engine.find_matches(lang, ast, root, p))
+                .collect();
+            if sites.is_empty() {
+                continue;
+            }
+            if stmts.len() > 1 {
+                println!("-- statement {}", n + 1);
+            }
+            for m in sites {
+                let node = ast.get(m.at);
+                let kind = node.map(|nd| nd.kind.as_str()).unwrap_or("?");
+                let span = node
+                    .and_then(|nd| nd.span)
+                    .map(|s| format!(" @{}..{}", s.start, s.end))
+                    .unwrap_or_default();
+                println!("match {kind}{span} <- {}", m.rule_id);
+                count += 1;
+            }
+        }
+        println!("plan: {count} match site(s)");
+        return 0;
+    }
+
+    let pass_refs: Vec<&str> = passes.iter().map(String::as_str).collect();
+    let mut json_out: Vec<serde_json::Value> = Vec::new();
+    let mut had_error = false;
+
+    for (n, ast) in stmts.iter().enumerate() {
+        let root = handl_language::AstRef::new(ast.len() - 1);
+        let out = if t.pipeline.is_some() {
+            engine.run_pipeline(lang, ast, root, &pass_refs)
+        } else {
+            engine.run_pass(lang, ast, root, &pass_refs[0])
+        };
+        let out = match out {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("transform: {file}: pass failed: {e}");
+                had_error = true;
+                continue;
+            }
+        };
+
+        match t.emit.as_str() {
+            "json" => {
+                json_out.push(json!({
+                    "statement": n + 1,
+                    "root": out.root.index(),
+                    "nodes": out.ast.nodes(),
+                }));
+            }
+            _ => {
+                if stmts.len() > 1 {
+                    println!("-- statement {}", n + 1);
+                }
+                let mut buf = String::new();
+                render_ast_tree(&out.ast, out.root.index(), 0, &mut buf);
+                print!("{buf}");
+            }
+        }
+
+        if t.trace {
+            for r in &out.trace.rewrites {
+                let from_kind = ast.get(r.from).map(|nd| nd.kind.as_str()).unwrap_or("?");
+                let to_kind = out.ast.get(r.to).map(|nd| nd.kind.as_str()).unwrap_or("?");
+                println!(
+                    "rewrite #{} {from_kind} -> #{} {to_kind} [{}]",
+                    r.from.index(),
+                    r.to.index(),
+                    r.rule_id
+                );
+            }
+        }
+
+        if t.stats {
+            println!("visited: {}", out.stats.visited);
+            println!("rewritten: {}", out.stats.rewritten);
+            println!(
+                "duration_ms: {:.3}",
+                out.stats.duration.as_secs_f64() * 1000.0
+            );
+            for (rule, count) in &out.stats.per_rule {
+                println!("rule {rule}: {count}");
+            }
+        }
+    }
+
+    if t.emit == "json" {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_out).unwrap_or_default()
+        );
+    }
+
+    if had_error { 1 } else { 0 }
+}
+
+/// Raw-parse `src` into one [`handl_language::Ast`] per top-level statement,
+/// WITHOUT the desugar pass (`Runtime::parse` always desugars — ADR-0082).
+///
+/// Statements are split at bracket-depth zero, respecting string literals
+/// and `--` comments — the same convention as the bootstrap typechecker,
+/// linter, and test runner.
+fn transform_parse_raw(
+    lang: &handl_language::Language,
+    src: &str,
+) -> Result<Vec<handl_language::Ast>, LangError> {
+    use handl_plugin_engine_parse::ParserEngine;
+
+    let mut asts = Vec::new();
+    for chunk in split_statements(src) {
+        let tokens = handl_plugin_engine_lex_pattern::lex(lang, &chunk)?;
+        if tokens.as_slice().is_empty() {
+            continue;
+        }
+        let req = handl_plugin_engine_parse::ParserRequest::new(tokens);
+        let ast = handl_plugin_engine_parse_pratt::PrattEngine::new().parse(lang, &req)?;
+        if !ast.is_empty() {
+            asts.push(ast);
+        }
+    }
+    Ok(asts)
+}
+
+/// Split `src` into top-level statement chunks at bracket-depth zero,
+/// respecting string literals and `--` comments (mirrors the bootstrap
+/// typechecker / linter / test runner convention — the Pratt parser parses
+/// one statement per call).
+fn split_statements(src: &str) -> Vec<String> {
+    let bytes = src.as_bytes();
+    let mut chunks = Vec::new();
+    let mut start = 0usize;
+    let mut depth: i32 = 0;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // String literal — skip to the closing quote (respecting escapes).
+        if b == b'"' {
+            i += 1;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'\\' => {
+                        i += 2;
+                        continue;
+                    }
+                    b'"' => {
+                        i += 1;
+                        break;
+                    }
+                    _ => i += 1,
+                }
+            }
+            continue;
+        }
+
+        // Comment: `--` to end of line.
+        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+
+        match b {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            _ => {}
+        }
+
+        if depth == 0 && (b == b'\n' || b == b';') {
+            let trimmed = src[start..i].trim();
+            if !trimmed.is_empty() {
+                chunks.push(trimmed.to_string());
+            }
+            i += 1;
+            start = i;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    let trimmed = src[start..].trim();
+    if !trimmed.is_empty() {
+        chunks.push(trimmed.to_string());
+    }
+    chunks
+}
+
+/// Render an [`handl_language::Ast`] subtree as an indented tree:
+/// `kind` plus a compact payload summary (the `children` index array is
+/// elided — it is rendered structurally as indentation).
+fn render_ast_tree(ast: &handl_language::Ast, idx: usize, depth: usize, out: &mut String) {
+    let Some(node) = ast.get(handl_language::AstRef::new(idx)) else {
+        return;
+    };
+    let indent = "  ".repeat(depth);
+
+    // Payload summary: everything except the `children` index array.
+    let summary = match &node.payload {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::Object(map) => {
+            let rest: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .filter(|(k, _)| k.as_str() != "children")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if rest.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", serde_json::Value::Object(rest))
+            }
+        }
+        other => format!(" {other}"),
+    };
+
+    let span = node
+        .span
+        .map(|s| format!("  ; @{}..{}", s.start, s.end))
+        .unwrap_or_default();
+    out.push_str(&format!("{indent}{}{summary}{span}\n", node.kind));
+
+    if let Some(children) = node.payload.get("children").and_then(|c| c.as_array()) {
+        for c in children {
+            if let Some(ci) = c.as_u64() {
+                render_ast_tree(ast, ci as usize, depth + 1, out);
+            }
         }
     }
 }
