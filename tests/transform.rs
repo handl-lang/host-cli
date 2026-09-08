@@ -46,11 +46,11 @@ fn transform_desugar_shows_rewrites() {
     assert!(stdout.contains("match"), "expected match node: {stdout}");
     assert!(stdout.contains("rec"), "expected rec node: {stdout}");
     assert!(
-        stdout.contains("native:desugar.nullish"),
+        stdout.contains("transform.desugar.nullish"),
         "expected nullish rewrite in trace: {stdout}"
     );
     assert!(
-        stdout.contains("native:desugar.while"),
+        stdout.contains("transform.desugar.while"),
         "expected while rewrite in trace: {stdout}"
     );
 }
@@ -102,7 +102,7 @@ fn transform_stats_prints_counts() {
         "expected rewritten: {stdout}"
     );
     assert!(
-        stdout.contains("rule native:desugar.nullish: 1"),
+        stdout.contains("rule transform.desugar.nullish: 1"),
         "expected per-rule count: {stdout}"
     );
 }
