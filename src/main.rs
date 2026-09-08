@@ -1013,7 +1013,7 @@ fn transform_command(args: &[String]) -> i32 {
     let mut source_parts: Vec<String> = Vec::new();
     let mut had_error = false;
 
-    for (n, (ast, _)) in stmts.iter().enumerate() {
+    for (n, (ast, info)) in stmts.iter().enumerate() {
         let root = handl_language::AstRef::new(ast.len() - 1);
         let out = if t.pipeline.is_some() {
             engine.run_pipeline(lang, ast, root, &pass_refs)
@@ -1030,33 +1030,49 @@ fn transform_command(args: &[String]) -> i32 {
         };
 
         if t.write || t.emit == "source" {
-            let changed: Vec<handl_language::AstRef> =
-                out.trace.rewrites.iter().map(|r| r.to).collect();
-            let emitter = match handl_plugin_engine_fmt::PreserveEmitter::new(
-                &src,
-                &out.ast,
-                out.root,
-                &changed,
-            ) {
-                Ok(e) => e,
-                Err(e) => {
+            if out.trace.rewrites.is_empty() {
+                source_parts.push(src[info.start..info.end].to_string());
+            } else {
+                if let Err(kinds) = check_emittable(lang, &out.ast, out.root) {
                     eprintln!(
-                        "transform: {file}: emit failed for statement {}: {e}",
-                        n + 1
+                        "transform: {file}: pass '{}' produced internal-form node(s): {}",
+                        passes.join(", "),
+                        kinds.join(", ")
+                    );
+                    eprintln!(
+                        "  --emit source and --write are only meaningful for surface-preserving passes"
                     );
                     had_error = true;
                     continue;
                 }
-            };
-            match emitter.format(lang, &out.ast, out.root) {
-                Ok(s) => source_parts.push(s),
-                Err(e) => {
-                    eprintln!(
-                        "transform: {file}: emit failed for statement {}: {e}",
-                        n + 1
-                    );
-                    had_error = true;
-                    continue;
+                let changed: Vec<handl_language::AstRef> =
+                    out.trace.rewrites.iter().map(|r| r.to).collect();
+                let emitter = match handl_plugin_engine_fmt::PreserveEmitter::new(
+                    &src,
+                    &out.ast,
+                    out.root,
+                    &changed,
+                ) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!(
+                            "transform: {file}: emit failed for statement {}: {e}",
+                            n + 1
+                        );
+                        had_error = true;
+                        continue;
+                    }
+                };
+                match emitter.format(lang, &out.ast, out.root) {
+                    Ok(s) => source_parts.push(s),
+                    Err(e) => {
+                        eprintln!(
+                            "transform: {file}: emit failed for statement {}: {e}",
+                            n + 1
+                        );
+                        had_error = true;
+                        continue;
+                    }
                 }
             }
         } else if t.emit == "json" {
@@ -1288,6 +1304,59 @@ fn trim_offsets(src: &str, a: usize, b: usize) -> (usize, usize) {
         end -= 1;
     }
     (start, end)
+}
+
+/// Check whether `ast` can be emitted back to surface syntax without loss.
+///
+/// Created (`span: None`) nodes whose kind has no grammar row and no useful
+/// leaf payload are internal forms (e.g. `rec`, `if__continue`) and cannot be
+/// turned into valid source. Returns the list of offending kinds.
+fn check_emittable(
+    lang: &handl_language::Language,
+    ast: &handl_language::Ast,
+    root: handl_language::AstRef,
+) -> Result<(), Vec<String>> {
+    let grammar_kinds: std::collections::HashSet<String> =
+        lang.grammar.iter().map(|r| r.child_shape.node_kind.clone()).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack = vec![root.index()];
+    let mut bad = Vec::new();
+    while let Some(i) = stack.pop() {
+        if !seen.insert(i) {
+            continue;
+        }
+        let Some(node) = ast.get(handl_language::AstRef::new(i)) else {
+            continue;
+        };
+        if node.span.is_none()
+            && !grammar_kinds.contains(&node.kind)
+            && !has_leaf_payload(node)
+        {
+            bad.push(node.kind.clone());
+        }
+        if let Some(children) = node.payload.get("children").and_then(|c| c.as_array()) {
+            for c in children {
+                if let Some(idx) = c.as_u64() {
+                    stack.push(idx as usize);
+                }
+            }
+        }
+    }
+    if bad.is_empty() {
+        Ok(())
+    } else {
+        bad.sort();
+        bad.dedup();
+        Err(bad)
+    }
+}
+
+/// Whether a node has a leaf-level payload that can be rendered as text.
+fn has_leaf_payload(node: &handl_language::AstNode) -> bool {
+    if node.payload.get("value").is_some() || node.payload.get("name").is_some() {
+        return true;
+    }
+    !node.payload.is_object() && !node.payload.is_null()
 }
 
 /// Render an [`handl_language::Ast`] subtree as an indented tree:
