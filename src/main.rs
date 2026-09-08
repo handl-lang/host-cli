@@ -16,7 +16,6 @@
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
-//! hnl typecheck '<expression>'                 — typecheck a single expression
 //! hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace]
 //!           [--stats] [--emit tree|json]       — run a transform pass (ADR-0094)
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
@@ -666,10 +665,15 @@ fn test_command(args: &[String]) -> i32 {
 // Import declaration stripping for `hnl run`
 // ---------------------------------------------------------------------------
 
-/// Remove top-level `from ... import ...` and `import ...` declaration lines.
+/// Remove top-level `from ... import ...` and `import <name> from ...`
+/// declaration lines — the module-declaration forms that name *modules*
+/// (resolved via the host module chain / `HandlModule` wiring), which the
+/// file-based module loader does not resolve yet.
 ///
-/// A `.hnl` file is a module with import declarations at the top; the body to
-/// evaluate is what remains (cf. `dedent.hnl`).
+/// A bare `import "path"` statement is a real executable op in all three
+/// eval engines and is **kept**: it resolves `path` through the
+/// `ModuleLoader` (relative to the module root, or via a `[dependencies]`
+/// entry from `.handl.toml`).
 fn strip_import_declarations(src: &str) -> String {
     src.lines()
         .filter(|line| !is_import_line(line.trim_start()))
@@ -679,14 +683,15 @@ fn strip_import_declarations(src: &str) -> String {
 
 fn is_import_line(trimmed: &str) -> bool {
     if let Some(rest) = trimmed.strip_prefix("import") {
-        if rest.is_empty()
-            || rest.starts_with(' ')
-            || rest.starts_with('\t')
-            || rest.starts_with('"')
-            || rest.starts_with('\'')
-        {
-            return true;
+        if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
+            // `import "path"` / `import 'path'` is the executable form —
+            // keep it. `import <name> ...` (e.g. `import insert from
+            // "collection/insert"`) is a module declaration — strip it.
+            let inner = rest.trim_start();
+            return !inner.starts_with('"') && !inner.starts_with('\'');
         }
+        // `import"x"` (no space) — treat as the executable form too.
+        return !rest.starts_with('"') && !rest.starts_with('\'');
     }
     if let Some(rest) = trimmed.strip_prefix("from") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
@@ -717,15 +722,19 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         }
     };
 
+    // Project-aware kit: discover `.handl.toml` by walking up from the
+    // source file's directory; its `[dependencies]` table feeds the module
+    // loader and its directory becomes the module root for `import "path"`.
+    let start = Path::new(path);
     let kit = match engine {
-        Some(name) => match Kit::with_eval(name) {
+        Some(name) => match Kit::discover_with_eval(start, name) {
             Ok(k) => k,
             Err(e) => {
                 eprintln!("run: {e}");
                 return 1;
             }
         },
-        None => match Kit::new() {
+        None => match Kit::discover(start) {
             Ok(k) => k,
             Err(e) => {
                 eprintln!("run: {e}");
@@ -759,7 +768,10 @@ fn eval_expression(expr: Option<&str>) -> i32 {
         }
     };
 
-    let kit = match Kit::new() {
+    // Project-aware kit: discover `.handl.toml` from the CWD upward so
+    // `import "dep/..."` resolves against `[dependencies]`.
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let kit = match Kit::discover(&cwd) {
         Ok(k) => k,
         Err(e) => {
             eprintln!("eval: {e}");
@@ -783,7 +795,6 @@ fn eval_expression(expr: Option<&str>) -> i32 {
     }
 }
 
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // `hnl transform <pass> <file> [--pipeline a,b,c] [--plan] [--trace] [--stats] [--emit tree|json]`
 // ---------------------------------------------------------------------------
