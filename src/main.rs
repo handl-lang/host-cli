@@ -16,7 +16,6 @@
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
 //! hnl run   <file.handl> [-- <args...>]        — run a file
 //! hnl eval  '<expression>'                     — evaluate an expression
-//! hnl typecheck '<expression>'                 — typecheck a single expression
 //! hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace]
 //!           [--stats] [--emit tree|json]       — run a transform pass (ADR-0094)
 //! hnl gen-grammar [output_path]                — generate TextMate grammar

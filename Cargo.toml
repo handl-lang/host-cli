@@ -9,6 +9,10 @@ path = "src/main.rs"
 
 [dependencies]
 handl-platform.workspace = true
+handl-plugin-engine-lex-pattern.workspace = true
+handl-plugin-engine-parse.workspace = true
+handl-plugin-engine-parse-pratt.workspace = true
+handl-plugin-engine-transform-rewrite.workspace = true
 handl-plugin-ext-cli.workspace = true
 handl-plugin-applier-bootstrap.workspace = true
 handl-kit-canonical.workspace = true
