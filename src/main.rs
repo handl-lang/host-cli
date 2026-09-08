@@ -10,7 +10,7 @@
 //! ```text
 //! hnl fmt   [--check] [--write] [paths...]    — format files
 //! hnl lint  [--fix] [--fail-on-warn] [paths...] — lint files
-//! hnl typecheck [paths...]                     — typecheck files
+//! hnl typecheck [paths...]                     — typecheck files (`hnl check` is an alias)
 //! hnl test  [--list] [--filter <pat>] [--tag <expr>] [--jobs N|auto]
 //!           [--report human|json] [--changed] [--cache] [paths...] — run tests
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
@@ -141,7 +141,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     if command.is_empty() {
-        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck, test, run, eval, transform, gen-grammar".into());
+        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck (alias: check), test, run, eval, transform, gen-grammar".into());
     }
     Ok(ParsedArgs {
         applier_id,
@@ -170,7 +170,8 @@ fn dispatch(p: ParsedArgs) -> i32 {
     match command.as_str() {
         "fmt" => fmt_command(&command_args),
         "lint" => lint_command(&command_args),
-        "typecheck" => typecheck_command(&command_args),
+        // `check` is an alias: ADR-0094's "runs under `hnl check`" wording.
+        "typecheck" | "check" => typecheck_command(&command_args),
         "test" => test_command(&command_args),
         "run" => run_file(command_args.first().map(String::as_str), engine.as_deref()),
         "eval" => eval_expression(command_args.first().map(String::as_str)),
@@ -423,7 +424,10 @@ fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
     let report = match handl_plugin_engine_typecheck::check_module(src) {
         Ok(r) => r,
         Err(err) => {
-            eprintln!("{path}: parse error: {err}");
+            // `CheckError`'s Display already carries its category prefix
+            // ("parse error: …" / "language error: …" — the latter covers
+            // transform-rule validation failures at Language build, ADR-0094).
+            eprintln!("{path}: {err}");
             return 2;
         }
     };

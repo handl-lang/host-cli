@@ -174,6 +174,25 @@ fn check_clean() {
     );
 }
 
+/// `hnl check` is an alias for `hnl typecheck` — ADR-0094's "runs under
+/// `hnl check`" wording. Both run the same check path, which assembles the
+/// canonical `Language` with transform-rule validation (`validate_transforms`)
+/// — Error-severity diagnostics would surface as
+/// `language error: transform rule validation failed: …` on stderr.
+#[test]
+fn check_alias_matches_typecheck() {
+    let path = fixture("unbound.handl");
+    let (code, stdout, _stderr) = run_hnl(&["check", path.to_str().unwrap()]);
+    assert_eq!(code, 1, "expected exit 1, got {code}\nstdout: {stdout}");
+    assert!(
+        stdout.contains("unbound"),
+        "expected unbound diagnostic, got: {stdout}"
+    );
+    let clean = fixture("clean.handl");
+    let (code, _, _) = run_hnl(&["check", clean.to_str().unwrap()]);
+    assert_eq!(code, 0, "expected exit 0 on clean fixture, got {code}");
+}
+
 #[test]
 fn check_with_errors() {
     let path = fixture("unbound.handl");
