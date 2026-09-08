@@ -777,26 +777,38 @@ fn test_command(args: &[String]) -> i32 {
 // Import declaration stripping for `hnl run`
 // ---------------------------------------------------------------------------
 
-/// Remove top-level `from ... import ...` and `import <name> from ...`
-/// declaration lines — the module-declaration forms that name *modules*
-/// (resolved via the host module chain / `HandlModule` wiring), which the
-/// file-based module loader does not resolve yet.
+/// Remove top-level import *declaration* lines — the forms that name a
+/// *host module* (resolved via the module chain / `HandlModule` wiring),
+/// which the file-based `ModuleLoader` does not resolve (ADR-0096
+/// §"Module-name imports"). The canonical kit's module chain already
+/// supplies those bindings, so the lines are decorative here.
 ///
-/// A bare `import "path"` statement is a real executable op in all three
-/// eval engines and is **kept**: it resolves `path` through the
-/// `ModuleLoader` (relative to the module root, or via a `[dependencies]`
-/// entry from `.handl.toml`).
-fn strip_import_declarations(src: &str) -> String {
+/// Kept (executable import ops resolved through the `ModuleLoader`):
+/// - `import "<spec>"` — always;
+/// - `from "<spec>" import ...` when `<spec>` resolves to an existing
+///   file under `bases` (the entry directory, then the module root, then
+///   the process working directory — mirroring `ModuleLoader`
+///   resolution) — e.g. a `from "./m.hnl" import * as m` line inside a
+///   multi-line `do { ... }` block is a real statement.
+///
+/// Stripped (host-module declarations):
+/// - `import <name> ...` / `import <name> from "<spec>"` — the
+///   module-declaration / arrow-dialect order, which the canonical grammar
+///   cannot execute;
+/// - `from "<bare-name>" import ...` — `<spec>` names a host module
+///   (`str`, `fn`, `dedent`, ...) or a specifier with no backing file —
+///   the module chain supplies the bindings either way.
+fn strip_import_declarations(src: &str, bases: &[&Path]) -> String {
     src.lines()
-        .filter(|line| !is_import_line(line.trim_start()))
+        .filter(|line| !is_import_line(line.trim_start(), bases))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn is_import_line(trimmed: &str) -> bool {
+fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
     if let Some(rest) = trimmed.strip_prefix("import") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
-            // `import "path"` / `import 'path'` is the executable form —
+            // `import "spec"` / `import 'spec'` is the executable form —
             // keep it. `import <name> ...` (e.g. `import insert from
             // "collection/insert"`) is a module declaration — strip it.
             let inner = rest.trim_start();
@@ -807,10 +819,41 @@ fn is_import_line(trimmed: &str) -> bool {
     }
     if let Some(rest) = trimmed.strip_prefix("from") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
-            return true;
+            // Strip iff the specifier names a host module — i.e. does not
+            // resolve to an existing file. An unparseable line is kept so
+            // the parser reports the error.
+            return match first_quoted_spec(rest) {
+                Some(spec) => !spec_resolves_to_file(spec, bases),
+                None => false,
+            };
         }
     }
     false
+}
+
+/// Whether `<spec>` resolves to an existing file under any of `bases`
+/// (checked in order — mirroring `ModuleLoader` relative resolution:
+/// importing module's directory, module root, working directory). A
+/// `.handl.toml` `[dependencies]` specifier that resolves outside these
+/// bases is stripped like any other host-module declaration; the
+/// declaration is decorative here either way and a referenced name fails
+/// loudly downstream.
+fn spec_resolves_to_file(spec: &str, bases: &[&Path]) -> bool {
+    if Path::new(spec).is_absolute() {
+        return Path::new(spec).is_file();
+    }
+    bases.iter().any(|base| base.join(spec).is_file())
+}
+
+/// Extract the first `'`- or `"`-quoted string literal's contents from a
+/// source fragment (e.g. the specifier in `from "..." import ...`).
+fn first_quoted_spec(s: &str) -> Option<&str> {
+    let bytes = s.as_bytes();
+    let start = bytes.iter().position(|&b| b == b'"' || b == b'\'')?;
+    let quote = bytes[start];
+    let rest = &s[start + 1..];
+    let end = rest.as_bytes().iter().position(|&b| b == quote)?;
+    Some(&rest[..end])
 }
 
 // ---------------------------------------------------------------------------
@@ -855,7 +898,28 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         },
     };
 
-    match kit.eval(&strip_import_declarations(&source)) {
+    // Resolution bases for `from "<spec>"` declaration lines, mirroring
+    // `ModuleLoader` order: the entry file's directory, the module root,
+    // then the process working directory. A `from` line whose specifier
+    // resolves to a file under one of these is kept (it is the executable
+    // import op); one that names a host module is stripped.
+    let mut bases: Vec<&Path> = Vec::new();
+    let dot = Path::new(".");
+    match start.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => bases.push(dir),
+        _ => bases.push(dot),
+    }
+    if let Some(root) = kit.module_root() {
+        if !bases.contains(&root) {
+            bases.push(root);
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if !bases.iter().any(|b| *b == cwd.as_path()) {
+        bases.push(&cwd);
+    }
+
+    match kit.eval(&strip_import_declarations(&source, &bases)) {
         Ok(value) => {
             print_value(&value);
             0
