@@ -76,6 +76,10 @@ fn transform_plan_lists_matches_without_applying() {
         stdout.contains("plan: 2 match site(s)"),
         "expected match count: {stdout}"
     );
+    assert!(
+        stdout.contains('@'),
+        "plan should include node byte span: {stdout}"
+    );
     // Plan mode never emits the transformed tree.
     assert!(
         !stdout.contains("  arm"),
@@ -223,4 +227,46 @@ fn desugar_transform_matches_runtime_parse() {
             "raw-parse+desugar must equal Runtime::parse output for: {src}"
         );
     }
+}
+
+#[test]
+fn transform_emit_source_preserves_leading_and_trailing_text() {
+    let path = fixture("transform_emit_source.hnl");
+    let src = std::fs::read_to_string(&path).unwrap();
+    let (code, stdout, stderr) = run_hnl(&[
+        "transform",
+        "desugar",
+        path.to_str().unwrap(),
+        "--emit",
+        "source",
+    ]);
+    assert_eq!(
+        code, 0,
+        "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert_eq!(stdout, src, "--emit source should round-trip unchanged source verbatim\nstdout: {stdout}");
+    assert!(stdout.starts_with("-- a comment at the top"), "leading comment lost: {stdout}");
+    assert!(stdout.contains("-- weird spacing + trailing comment"), "trailing comment lost: {stdout}");
+    assert!(stdout.contains("(1  +  2)"), "internal spacing should be preserved: {stdout}");
+}
+
+#[test]
+fn transform_emit_source_rejects_lowering_pass() {
+    let path = fixture("transform_desugar.hnl");
+    let (code, _stdout, stderr) = run_hnl(&[
+        "transform",
+        "desugar",
+        path.to_str().unwrap(),
+        "--emit",
+        "source",
+    ]);
+    assert_eq!(code, 1, "expected exit 1 for lowering pass, got {code}\nstderr: {stderr}");
+    assert!(
+        stderr.contains("internal-form"),
+        "expected internal-form warning: {stderr}"
+    );
+    assert!(
+        stderr.contains("surface-preserving"),
+        "expected surface-preserving guidance: {stderr}"
+    );
 }
