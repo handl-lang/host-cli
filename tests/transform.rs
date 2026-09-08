@@ -76,6 +76,10 @@ fn transform_plan_lists_matches_without_applying() {
         stdout.contains("plan: 2 match site(s)"),
         "expected match count: {stdout}"
     );
+    assert!(
+        stdout.contains('@'),
+        "plan should include node byte span: {stdout}"
+    );
     // Plan mode never emits the transformed tree.
     assert!(
         !stdout.contains("  arm"),
