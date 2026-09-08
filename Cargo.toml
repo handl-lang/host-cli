@@ -22,6 +22,7 @@ handl-plugin-engine-test = {path = "../plugin-engine-test" }
 handl-plugin-engine-lex-pattern = { path = "../plugin-engine-lex-pattern" }
 handl-plugin-engine-parse = { path = "../plugin-engine-parse" }
 handl-plugin-engine-parse-pratt = { path = "../plugin-engine-parse-pratt" }
+handl-plugin-engine-fmt = { path = "../plugin-engine-fmt" }
 handl-plugin-engine-transform-rewrite = { path = "../plugin-engine-transform-rewrite" }
 handl-plugin-lib-scheduler.workspace = true
 serde_json.workspace = true
