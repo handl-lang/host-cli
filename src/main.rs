@@ -417,12 +417,109 @@ fn typecheck_command(args: &[String]) -> i32 {
     if had_failure { 1 } else { 0 }
 }
 
+// ---------------------------------------------------------------------------
+// Dialect detection (ADR-0077)
+// ---------------------------------------------------------------------------
+//
+// Not every `.hnl` file is written in the canonical surface language. Two
+// sibling dialects are parsed by `plugin-ext-refinement` instead:
+//
+// - **Contract files**: `axiom <name> : <type> -> <type>` headers plus
+//   indented `requires:`/`guarantee:`/`termination:` clauses — validated by
+//   `loader::parse_contracts`.
+// - **Arrow-module files**: top-level `cap`/`op`/`handl`/`tag` declarations
+//   and arrow-graph expressions (`arr(...)`, `a >>> b`, `a ||| b`,
+//   `first(...)`, `loop(...)`, `rec { ... }`, `comp(...)`, `app(...)`) —
+//   validated by `arrow_parser::parse_arrow_module`, which runs the
+//   canonical-grammar data-driven parser with a legacy arrow fallback.
+//
+// `hnl typecheck` is the canonical-language checker, so these files are
+// routed to their own loaders: a successful dialect parse means the file is
+// valid in the dialect that owns it.
+
+/// A top-level (column-0) source line, with `--` line comments removed.
+/// Returns `None` for blank lines, comments, and indented lines (contract
+/// clause lines are indented and never carry a directive keyword).
+fn top_level_line(line: &str) -> Option<&str> {
+    if line.chars().next().is_none_or(|c| c.is_whitespace()) {
+        return None;
+    }
+    let code = line.split_once("--").map(|(c, _)| c).unwrap_or(line);
+    let t = code.trim_end();
+    (!t.is_empty()).then_some(t)
+}
+
+/// True when the source is a contract-dialect file: the first top-level
+/// statement line starts with `axiom `.
+fn is_contract_source(src: &str) -> bool {
+    src.lines()
+        .filter_map(top_level_line)
+        .next()
+        .is_some_and(|l| l.starts_with("axiom "))
+}
+
+/// True when the source shows arrow-dialect markers: top-level
+/// `cap`/`op`/`handl`/`tag` declaration lines or arrow-combinator
+/// expressions (`arr(`, `first(`, `choice(`, `loop(`, `comp(`, `app(`,
+/// `|||`, `rec {`).
+fn has_arrow_markers(src: &str) -> bool {
+    const DIRECTIVES: [&str; 4] = ["cap ", "op ", "handl ", "tag "];
+    const COMBINATORS: [&str; 8] = [
+        "arr(",
+        "first(",
+        "choice(",
+        "loop(",
+        "comp(",
+        "app(",
+        "|||",
+        "rec {",
+    ];
+    src.lines().any(|line| {
+        let code = line.split_once("--").map(|(c, _)| c).unwrap_or(line);
+        if let Some(top) = top_level_line(line) {
+            if DIRECTIVES.iter().any(|d| top.starts_with(d)) {
+                return true;
+            }
+        }
+        COMBINATORS.iter().any(|c| code.contains(c))
+    })
+}
+
+/// Try to validate `src` as an arrow-module dialect file. Returns `true`
+/// when `parse_arrow_module` accepts it.
+fn parses_as_arrow_module(src: &str) -> bool {
+    handl_plugin_ext_refinement::parse_arrow_module(src).is_ok()
+}
+
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
 /// for Error diagnostics.
 fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
+    // Contract dialect (ADR-0077): `axiom`/`requires:`/`guarantee:` files are
+    // validated by the refinement contract loader, not the canonical
+    // grammar — they carry `->`/`→`/`×`/`∧`/`∨` syntax that is not part of
+    // the canonical surface language.
+    if is_contract_source(src) {
+        return match handl_plugin_ext_refinement::parse_contracts(src) {
+            Ok(_) => 0,
+            Err(e) => {
+                eprintln!("{path}: contract error: {e}");
+                2
+            }
+        };
+    }
+
+    let arrow_markers = has_arrow_markers(src);
+
     let report = match handl_plugin_engine_typecheck::check_module(src) {
         Ok(r) => r,
         Err(err) => {
+            // Canonical parse failed — the file may belong to the arrow
+            // dialect (`rec { ... }` simple form, `>>>` arrow graphs,
+            // directive lines that canonical parsed as calls). Route it to
+            // the arrow-module parser before reporting an error.
+            if parses_as_arrow_module(src) {
+                return 0;
+            }
             // `CheckError`'s Display already carries its category prefix
             // ("parse error: …" / "language error: …" — the latter covers
             // transform-rule validation failures at Language build, ADR-0094).
@@ -430,6 +527,21 @@ fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
             return 2;
         }
     };
+
+    // Canonical parse succeeded but produced errors — if the file is an
+    // arrow-dialect module (directive lines or arrow combinators) that its
+    // own parser accepts, the canonical diagnostics are a dialect mismatch,
+    // not real errors (e.g. `cap`/`op`/`handl`/`tag` reported as unbound
+    // wires).
+    if report
+        .diagnostics
+        .iter()
+        .any(|d| d.severity == Severity::Error)
+        && arrow_markers
+        && parses_as_arrow_module(src)
+    {
+        return 0;
+    }
 
     let rendered = render_diagnostics(&report.diagnostics, path);
     if !rendered.is_empty() {

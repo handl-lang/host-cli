@@ -22,6 +22,7 @@ handl-plugin-ext-fmt.workspace = true
 handl-plugin-ext-lint.workspace = true
 handl-plugin-ext-diag.workspace = true
 handl-plugin-engine-typecheck.workspace = true
+handl-plugin-ext-refinement.workspace = true
 handl-plugin-engine-test = {path = "../plugin-engine-test" }
 handl-plugin-engine-fmt.workspace = true
 handl-plugin-lib-scheduler.workspace = true
