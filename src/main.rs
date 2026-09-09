@@ -38,6 +38,7 @@ use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_ext_diag::{Severity, render_diagnostic, render_diagnostics};
+use handl_plugin_ext_refinement::{Dialect, detect_dialect};
 use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------
@@ -246,6 +247,11 @@ fn fmt_command(args: &[String]) -> i32 {
 /// Format a single source. Returns 2 on parse error (and sets `had_failure`
 /// for check failures). Otherwise returns 0.
 fn fmt_one(src: &str, path: &str, check: bool, write: bool, had_failure: &mut bool) -> i32 {
+    if detect_dialect(src) != Dialect::Canonical {
+        eprintln!("skipping dialect file: {path}");
+        return 0;
+    }
+
     if check {
         match handl_plugin_ext_fmt::check_source(src) {
             Ok(true) => 0,
@@ -335,7 +341,17 @@ fn lint_command(args: &[String]) -> i32 {
 /// Lint a single source. Returns 2 on parse error; sets `had_failure` for
 /// Error diagnostics (or Warning when `fail_on_warn`).
 fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &mut bool) -> i32 {
-    let diags = match handl_plugin_ext_lint::lint_source(src) {
+    if detect_dialect(src) != Dialect::Canonical {
+        eprintln!("skipping dialect file: {path}");
+        return 0;
+    }
+
+    // `unbound-wire` is delegated to the bootstrap typechecker's scope pass;
+    // seed it with the same wire prelude `hnl typecheck` uses (ADR-0096).
+    let diags = match handl_plugin_ext_lint::lint_source_with_prelude(
+        src,
+        typecheck_wire_prelude(),
+    ) {
         Ok(d) => d,
         Err(err) => {
             eprintln!("{path}: parse error: {err}");
@@ -355,7 +371,7 @@ fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &
     }
 
     if fix {
-        match handl_plugin_ext_lint::fix_source(src) {
+        match handl_plugin_ext_lint::fix_source_with_prelude(src, typecheck_wire_prelude()) {
             Ok(fixed) => {
                 if let Err(e) = write_atomic(path, &fixed) {
                     eprintln!("lint: failed to write {path}: {e}");
@@ -417,131 +433,55 @@ fn typecheck_command(args: &[String]) -> i32 {
     if had_failure { 1 } else { 0 }
 }
 
-// ---------------------------------------------------------------------------
-// Dialect detection (ADR-0077)
-// ---------------------------------------------------------------------------
-//
-// Not every `.hnl` file is written in the canonical surface language. Two
-// sibling dialects are parsed by `plugin-ext-refinement` instead:
-//
-// - **Contract files**: `axiom <name> : <type> -> <type>` headers plus
-//   indented `requires:`/`guarantee:`/`termination:` clauses — validated by
-//   `loader::parse_contracts`.
-// - **Arrow-module files**: top-level `cap`/`op`/`handl`/`tag` declarations
-//   and arrow-graph expressions (`arr(...)`, `a >>> b`, `a ||| b`,
-//   `first(...)`, `loop(...)`, `rec { ... }`, `comp(...)`, `app(...)`) —
-//   validated by `arrow_parser::parse_arrow_module`, which runs the
-//   canonical-grammar data-driven parser with a legacy arrow fallback.
-//
-// `hnl typecheck` is the canonical-language checker, so these files are
-// routed to their own loaders: a successful dialect parse means the file is
-// valid in the dialect that owns it.
 
-/// A top-level (column-0) source line, with `--` line comments removed.
-/// Returns `None` for blank lines, comments, and indented lines (contract
-/// clause lines are indented and never carry a directive keyword).
-fn top_level_line(line: &str) -> Option<&str> {
-    if line.chars().next().is_none_or(|c| c.is_whitespace()) {
-        return None;
-    }
-    let code = line.split_once("--").map(|(c, _)| c).unwrap_or(line);
-    let t = code.trim_end();
-    (!t.is_empty()).then_some(t)
-}
-
-/// True when the source is a contract-dialect file: the first top-level
-/// statement line starts with `axiom `.
-fn is_contract_source(src: &str) -> bool {
-    src.lines()
-        .filter_map(top_level_line)
-        .next()
-        .is_some_and(|l| l.starts_with("axiom "))
-}
-
-/// True when the source shows arrow-dialect markers: top-level
-/// `cap`/`op`/`handl`/`tag` declaration lines or arrow-combinator
-/// expressions (`arr(`, `first(`, `choice(`, `loop(`, `comp(`, `app(`,
-/// `|||`, `rec {`).
-fn has_arrow_markers(src: &str) -> bool {
-    const DIRECTIVES: [&str; 4] = ["cap ", "op ", "handl ", "tag "];
-    const COMBINATORS: [&str; 8] = [
-        "arr(",
-        "first(",
-        "choice(",
-        "loop(",
-        "comp(",
-        "app(",
-        "|||",
-        "rec {",
-    ];
-    src.lines().any(|line| {
-        let code = line.split_once("--").map(|(c, _)| c).unwrap_or(line);
-        if let Some(top) = top_level_line(line) {
-            if DIRECTIVES.iter().any(|d| top.starts_with(d)) {
-                return true;
-            }
-        }
-        COMBINATORS.iter().any(|c| code.contains(c))
-    })
-}
-
-/// Try to validate `src` as an arrow-module dialect file. Returns `true`
-/// when `parse_arrow_module` accepts it.
-fn parses_as_arrow_module(src: &str) -> bool {
-    handl_plugin_ext_refinement::parse_arrow_module(src).is_ok()
+/// The process-wide unbound-wire prelude for `hnl typecheck`: the names
+/// the canonical kit's module chain supplies at eval time (ADR-0096).
+fn typecheck_wire_prelude() -> &'static std::collections::HashSet<String> {
+    static PRELUDE: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    PRELUDE.get_or_init(handl_kit_canonical::canonical_wire_names)
 }
 
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
 /// for Error diagnostics.
 fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
-    // Contract dialect (ADR-0077): `axiom`/`requires:`/`guarantee:` files are
-    // validated by the refinement contract loader, not the canonical
-    // grammar — they carry `->`/`→`/`×`/`∧`/`∨` syntax that is not part of
-    // the canonical surface language.
-    if is_contract_source(src) {
-        return match handl_plugin_ext_refinement::parse_contracts(src) {
-            Ok(_) => 0,
-            Err(e) => {
-                eprintln!("{path}: contract error: {e}");
-                2
-            }
-        };
+    // Route non-canonical dialects to their own loaders (ADR-0077).
+    match detect_dialect(src) {
+        Dialect::Contract => {
+            return match handl_plugin_ext_refinement::parse_contracts(src) {
+                Ok(_) => 0,
+                Err(e) => {
+                    eprintln!("{path}: contract error: {e}");
+                    2
+                }
+            };
+        }
+        Dialect::Arrow => {
+            // A successful dialect parse means the file is valid in the
+            // dialect that owns it; `hnl typecheck` is the canonical
+            // checker, so arrow modules are accepted as-is.
+            return 0;
+        }
+        Dialect::Canonical => {}
     }
 
-    let arrow_markers = has_arrow_markers(src);
-
-    let report = match handl_plugin_engine_typecheck::check_module(src) {
+    // Seed the checker's scope with the same wire names the eval engines
+    // auto-wire via the module chain (module names like `str`/`json`/
+    // `assert`/`test`, flat host-function names like `map`/`pipe`, and the
+    // ambient globals `self`/`hello`) — ADR-0096's unified import model.
+    // The name set is derived from the canonical kit's own stdlib registry
+    // (`canonical_wire_names`), not a hardcoded list, and is computed once
+    // per process.
+    let report = match handl_plugin_engine_typecheck::check_module_with_prelude(
+        src,
+        typecheck_wire_prelude(),
+    ) {
         Ok(r) => r,
         Err(err) => {
-            // Canonical parse failed — the file may belong to the arrow
-            // dialect (`rec { ... }` simple form, `>>>` arrow graphs,
-            // directive lines that canonical parsed as calls). Route it to
-            // the arrow-module parser before reporting an error.
-            if parses_as_arrow_module(src) {
-                return 0;
-            }
-            // `CheckError`'s Display already carries its category prefix
-            // ("parse error: …" / "language error: …" — the latter covers
-            // transform-rule validation failures at Language build, ADR-0094).
             eprintln!("{path}: {err}");
             return 2;
         }
     };
-
-    // Canonical parse succeeded but produced errors — if the file is an
-    // arrow-dialect module (directive lines or arrow combinators) that its
-    // own parser accepts, the canonical diagnostics are a dialect mismatch,
-    // not real errors (e.g. `cap`/`op`/`handl`/`tag` reported as unbound
-    // wires).
-    if report
-        .diagnostics
-        .iter()
-        .any(|d| d.severity == Severity::Error)
-        && arrow_markers
-        && parses_as_arrow_module(src)
-    {
-        return 0;
-    }
 
     let rendered = render_diagnostics(&report.diagnostics, path);
     if !rendered.is_empty() {
