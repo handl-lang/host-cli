@@ -356,10 +356,8 @@ fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &
 
     // `unbound-wire` is delegated to the bootstrap typechecker's scope pass;
     // seed it with the same wire prelude `hnl typecheck` uses (ADR-0096).
-    let diags = match handl_plugin_ext_lint::lint_source_with_prelude(
-        src,
-        typecheck_wire_prelude(),
-    ) {
+    let diags = match handl_plugin_ext_lint::lint_source_with_prelude(src, typecheck_wire_prelude())
+    {
         Ok(d) => d,
         Err(err) => {
             eprintln!("{path}: parse error: {err}");
@@ -456,7 +454,6 @@ fn typecheck_command(args: &[String]) -> i32 {
 
     if had_failure { 1 } else { 0 }
 }
-
 
 /// The process-wide unbound-wire prelude for `hnl typecheck`: the names
 /// the canonical kit's module chain supplies at eval time (ADR-0096).
@@ -1200,10 +1197,7 @@ fn transform_command(args: &[String]) -> i32 {
                 let changed: Vec<handl_language::AstRef> =
                     out.trace.rewrites.iter().map(|r| r.to).collect();
                 let emitter = match handl_plugin_engine_fmt::PreserveEmitter::new(
-                    &src,
-                    &out.ast,
-                    out.root,
-                    &changed,
+                    &src, &out.ast, out.root, &changed,
                 ) {
                     Ok(e) => e,
                     Err(e) => {
@@ -1468,8 +1462,11 @@ fn check_emittable(
     ast: &handl_language::Ast,
     root: handl_language::AstRef,
 ) -> Result<(), Vec<String>> {
-    let grammar_kinds: std::collections::HashSet<String> =
-        lang.grammar.iter().map(|r| r.child_shape.node_kind.clone()).collect();
+    let grammar_kinds: std::collections::HashSet<String> = lang
+        .grammar
+        .iter()
+        .map(|r| r.child_shape.node_kind.clone())
+        .collect();
     let mut seen = std::collections::BTreeSet::new();
     let mut stack = vec![root.index()];
     let mut bad = Vec::new();
@@ -1480,10 +1477,7 @@ fn check_emittable(
         let Some(node) = ast.get(handl_language::AstRef::new(i)) else {
             continue;
         };
-        if node.span.is_none()
-            && !grammar_kinds.contains(&node.kind)
-            && !has_leaf_payload(node)
-        {
+        if node.span.is_none() && !grammar_kinds.contains(&node.kind) && !has_leaf_payload(node) {
             bad.push(node.kind.clone());
         }
         if let Some(children) = node.payload.get("children").and_then(|c| c.as_array()) {

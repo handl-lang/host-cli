@@ -244,10 +244,22 @@ fn transform_emit_source_preserves_leading_and_trailing_text() {
         code, 0,
         "expected exit 0, got {code}\nstdout: {stdout}\nstderr: {stderr}"
     );
-    assert_eq!(stdout, src, "--emit source should round-trip unchanged source verbatim\nstdout: {stdout}");
-    assert!(stdout.starts_with("-- a comment at the top"), "leading comment lost: {stdout}");
-    assert!(stdout.contains("-- weird spacing + trailing comment"), "trailing comment lost: {stdout}");
-    assert!(stdout.contains("(1  +  2)"), "internal spacing should be preserved: {stdout}");
+    assert_eq!(
+        stdout, src,
+        "--emit source should round-trip unchanged source verbatim\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.starts_with("-- a comment at the top"),
+        "leading comment lost: {stdout}"
+    );
+    assert!(
+        stdout.contains("-- weird spacing + trailing comment"),
+        "trailing comment lost: {stdout}"
+    );
+    assert!(
+        stdout.contains("(1  +  2)"),
+        "internal spacing should be preserved: {stdout}"
+    );
 }
 
 #[test]
@@ -260,7 +272,10 @@ fn transform_emit_source_rejects_lowering_pass() {
         "--emit",
         "source",
     ]);
-    assert_eq!(code, 1, "expected exit 1 for lowering pass, got {code}\nstderr: {stderr}");
+    assert_eq!(
+        code, 1,
+        "expected exit 1 for lowering pass, got {code}\nstderr: {stderr}"
+    );
     assert!(
         stderr.contains("internal-form"),
         "expected internal-form warning: {stderr}"
