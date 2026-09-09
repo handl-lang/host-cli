@@ -33,7 +33,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use handl_kit_canonical::Kit;
-use handl_language::LangError;
+use handl_language::{LangError, Language};
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
@@ -405,6 +405,18 @@ fn typecheck_command(args: &[String]) -> i32 {
         }
     }
 
+    // The canonical `Language` is assembled once here (single YAML→Language
+    // path via `handl-kit-canonical`) and injected into the checker —
+    // `plugin-engine-typecheck` no longer embeds its own copy (ADR-0097).
+    let kit = match Kit::new() {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("typecheck: {e}");
+            return 2;
+        }
+    };
+    let lang = kit.lang();
+
     let mut had_failure = false;
 
     if paths.is_empty() {
@@ -413,7 +425,7 @@ fn typecheck_command(args: &[String]) -> i32 {
             eprintln!("typecheck: failed to read stdin");
             return 2;
         }
-        return typecheck_one(&src, "<stdin>", &mut had_failure);
+        return typecheck_one(lang, &src, "<stdin>", &mut had_failure);
     }
 
     for path in &paths {
@@ -424,7 +436,7 @@ fn typecheck_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = typecheck_one(&src, path, &mut had_failure);
+        let code = typecheck_one(lang, &src, path, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -444,7 +456,7 @@ fn typecheck_wire_prelude() -> &'static std::collections::HashSet<String> {
 
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
 /// for Error diagnostics.
-fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
+fn typecheck_one(lang: &Language, src: &str, path: &str, had_failure: &mut bool) -> i32 {
     // Route non-canonical dialects to their own loaders (ADR-0077).
     match detect_dialect(src) {
         Dialect::Contract => {
@@ -473,6 +485,7 @@ fn typecheck_one(src: &str, path: &str, had_failure: &mut bool) -> i32 {
     // (`canonical_wire_names`), not a hardcoded list, and is computed once
     // per process.
     let report = match handl_plugin_engine_typecheck::check_module_with_prelude(
+        lang,
         src,
         typecheck_wire_prelude(),
     ) {
