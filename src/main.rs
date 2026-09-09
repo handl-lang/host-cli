@@ -224,7 +224,11 @@ fn fmt_command(args: &[String]) -> i32 {
             eprintln!("fmt: failed to read stdin");
             return 2;
         }
-        return fmt_one(&src, "<stdin>", check, write, &mut had_failure);
+        let code = fmt_one(&src, "<stdin>", check, write, &mut had_failure);
+        if code == 2 {
+            return 2;
+        }
+        return if had_failure { 1 } else { 0 };
     }
 
     for path in &paths {
@@ -318,7 +322,11 @@ fn lint_command(args: &[String]) -> i32 {
             eprintln!("lint: failed to read stdin");
             return 2;
         }
-        return lint_one(&src, "<stdin>", fix, fail_on_warn, &mut had_failure);
+        let code = lint_one(&src, "<stdin>", fix, fail_on_warn, &mut had_failure);
+        if code == 2 {
+            return 2;
+        }
+        return if had_failure { 1 } else { 0 };
     }
 
     for path in &paths {
@@ -425,7 +433,11 @@ fn typecheck_command(args: &[String]) -> i32 {
             eprintln!("typecheck: failed to read stdin");
             return 2;
         }
-        return typecheck_one(lang, &src, "<stdin>", &mut had_failure);
+        let code = typecheck_one(lang, &src, "<stdin>", &mut had_failure);
+        if code == 2 {
+            return 2;
+        }
+        return if had_failure { 1 } else { 0 };
     }
 
     for path in &paths {
