@@ -400,9 +400,11 @@ fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &
 
 fn typecheck_command(args: &[String]) -> i32 {
     let mut paths = Vec::new();
+    let mut use_handl = false;
     for arg in args {
         match arg.as_str() {
             "--" => {}
+            "--handl" => use_handl = true,
             s if s.starts_with("--") => {
                 eprintln!("typecheck: unknown flag `{s}`");
                 return 2;
@@ -431,7 +433,7 @@ fn typecheck_command(args: &[String]) -> i32 {
             eprintln!("typecheck: failed to read stdin");
             return 2;
         }
-        let code = typecheck_one(lang, &src, "<stdin>", &mut had_failure);
+        let code = typecheck_one(&kit, lang, use_handl, &src, "<stdin>", &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -446,7 +448,7 @@ fn typecheck_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = typecheck_one(lang, &src, path, &mut had_failure);
+        let code = typecheck_one(&kit, lang, use_handl, &src, path, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -465,7 +467,20 @@ fn typecheck_wire_prelude() -> &'static std::collections::HashSet<String> {
 
 /// Typecheck a single source. Returns 2 on parse error; sets `had_failure`
 /// for Error diagnostics.
-fn typecheck_one(lang: &Language, src: &str, path: &str, had_failure: &mut bool) -> i32 {
+///
+/// When `use_handl` is set, the canonical-dialect path routes through
+/// `Kit::typecheck_handl` (the Handl-authored `.hnl` model adapter,
+/// ADR-0105) instead of the bootstrap `check_module_with_prelude`. The
+/// dialect routing (Contract/Arrow) is unchanged — only canonical sources
+/// reach the Handl engine.
+fn typecheck_one(
+    kit: &Kit,
+    lang: &Language,
+    use_handl: bool,
+    src: &str,
+    path: &str,
+    had_failure: &mut bool,
+) -> i32 {
     // Route non-canonical dialects to their own loaders (ADR-0077).
     match detect_dialect(src) {
         Dialect::Contract => {
@@ -486,38 +501,61 @@ fn typecheck_one(lang: &Language, src: &str, path: &str, had_failure: &mut bool)
         Dialect::Canonical => {}
     }
 
-    // Seed the checker's scope with the same wire names the eval engines
-    // auto-wire via the module chain (module names like `str`/`json`/
-    // `assert`/`test`, flat host-function names like `map`/`pipe`, and the
-    // ambient globals `self`/`hello`) — ADR-0096's unified import model.
-    // The name set is derived from the canonical kit's own stdlib registry
-    // (`canonical_wire_names`), not a hardcoded list, and is computed once
-    // per process.
-    let report = match handl_plugin_engine_typecheck::check_module_with_prelude(
-        lang,
-        src,
-        typecheck_wire_prelude(),
-    ) {
-        Ok(r) => r,
-        Err(err) => {
-            eprintln!("{path}: {err}");
-            return 2;
+    // Opt-in Handl engine path (ADR-0105). The Handl model adapter lexes,
+    // parses, and typechecks via the embedded `.hnl` model instead of the
+    // bootstrap NBE checker. On success it returns the synthesized type;
+    // on failure the `LangError` is rendered and recorded as a failure.
+    if use_handl {
+        match kit.typecheck_handl(src) {
+            Ok(typ) => {
+                println!("{path}: ok: {typ}");
+                0
+            }
+            Err(err) => {
+                eprintln!("{path}: {err}");
+                // Lex failures are parse-stage errors (exit 2); everything
+                // else (parse/typecheck engine errors) is a check failure.
+                if matches!(err, LangError::LexError { .. }) {
+                    return 2;
+                }
+                *had_failure = true;
+                0
+            }
         }
-    };
+    } else {
+        // Seed the checker's scope with the same wire names the eval engines
+        // auto-wire via the module chain (module names like `str`/`json`/
+        // `assert`/`test`, flat host-function names like `map`/`pipe`, and the
+        // ambient globals `self`/`hello`) — ADR-0096's unified import model.
+        // The name set is derived from the canonical kit's own stdlib registry
+        // (`canonical_wire_names`), not a hardcoded list, and is computed once
+        // per process.
+        let report = match handl_plugin_engine_typecheck::check_module_with_prelude(
+            lang,
+            src,
+            typecheck_wire_prelude(),
+        ) {
+            Ok(r) => r,
+            Err(err) => {
+                eprintln!("{path}: {err}");
+                return 2;
+            }
+        };
 
-    let rendered = render_diagnostics(&report.diagnostics, path);
-    if !rendered.is_empty() {
-        println!("{rendered}");
-    }
+        let rendered = render_diagnostics(&report.diagnostics, path);
+        if !rendered.is_empty() {
+            println!("{rendered}");
+        }
 
-    if report
-        .diagnostics
-        .iter()
-        .any(|d| d.severity == Severity::Error)
-    {
-        *had_failure = true;
+        if report
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == Severity::Error)
+        {
+            *had_failure = true;
+        }
+        0
     }
-    0
 }
 
 // ---------------------------------------------------------------------------
