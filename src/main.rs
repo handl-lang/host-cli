@@ -10,7 +10,9 @@
 //! ```text
 //! hnl fmt   [--check] [--write] [paths...]    — format files
 //! hnl lint  [--fix] [--fail-on-warn] [paths...] — lint files
-//! hnl typecheck [paths...]                     — typecheck files (`hnl check` is an alias)
+//! hnl typecheck [--handl] [paths...]                     — typecheck files (`hnl check` is an alias)
+//!                                                         (--handl routes to the
+//!                                                         Handl engine, ADR-0105)
 //! hnl test  [--list] [--filter <pat>] [--tag <expr>] [--jobs N|auto]
 //!           [--report human|json] [--changed] [--cache] [paths...] — run tests
 //!           (--cache stores results in `.handl/cache/test-runner/cache.json`)
