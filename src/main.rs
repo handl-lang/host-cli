@@ -804,11 +804,41 @@ fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
 /// bases is stripped like any other host-module declaration; the
 /// declaration is decorative here either way and a referenced name fails
 /// loudly downstream.
+///
+/// A directory is treated as a package if it contains an `index.hnl` or
+/// a `<dir>/<name>.hnl` main file; a bare name without `.hnl` is tried
+/// with `.hnl` appended.
 fn spec_resolves_to_file(spec: &str, bases: &[&Path]) -> bool {
     if Path::new(spec).is_absolute() {
-        return Path::new(spec).is_file();
+        return file_candidate(Path::new(spec), spec).is_some();
     }
-    bases.iter().any(|base| base.join(spec).is_file())
+    bases.iter().any(|base| file_candidate(&base.join(spec), spec).is_some())
+}
+
+fn file_candidate(joined: &Path, spec: &str) -> Option<PathBuf> {
+    if joined.is_dir() {
+        let index = joined.join("index.hnl");
+        if index.is_file() {
+            return Some(index);
+        }
+        if let Some(name) = joined.file_name().and_then(|s| s.to_str()) {
+            let main = joined.join(format!("{}.hnl", name));
+            if main.is_file() {
+                return Some(main);
+            }
+        }
+    }
+    if !spec.ends_with(".hnl") {
+        let with_ext = joined.with_extension("hnl");
+        if with_ext.is_file() {
+            return Some(with_ext);
+        }
+    }
+    if joined.is_file() {
+        Some(joined.to_path_buf())
+    } else {
+        None
+    }
 }
 
 /// Extract the first `'`- or `"`-quoted string literal's contents from a
