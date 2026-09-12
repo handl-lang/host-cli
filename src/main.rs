@@ -504,14 +504,22 @@ fn typecheck_one(
             0
         }
         Err(err) => {
-            eprintln!("{path}: {err}");
-            // Lex failures are parse-stage errors (exit 2); everything
-            // else (parse/typecheck engine errors) is a check failure.
+            // Lex failures and other parse-stage engine errors are exit 2.
+            // `typecheck_handl` reports typecheck failures with the prefix
+            // "typecheck errors: ..."; those are exit 1 and are printed to
+            // stdout so the diagnostic is visible to the `hnl typecheck`
+            // tests.
             if matches!(err, LangError::LexError { .. }) {
+                eprintln!("{path}: {err}");
                 return 2;
             }
-            *had_failure = true;
-            0
+            if err.to_string().contains("typecheck errors:") {
+                println!("{path}: {err}");
+                *had_failure = true;
+                return 0;
+            }
+            eprintln!("{path}: {err}");
+            2
         }
     }
 }
