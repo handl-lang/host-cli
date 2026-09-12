@@ -915,7 +915,14 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         bases.push(&cwd);
     }
 
-    match kit.eval(&strip_import_declarations(&source, &bases)) {
+    let source = strip_import_declarations(&source, &bases);
+    let trimmed = source.trim_start();
+    let source = if trimmed.starts_with("do") {
+        source.to_string()
+    } else {
+        format!("do {{\n{}\n}}", source)
+    };
+    match kit.eval(&source) {
         Ok(value) => {
             print_value(&value);
             0
