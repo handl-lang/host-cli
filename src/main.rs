@@ -19,6 +19,8 @@
 //! hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace]
 //!           [--stats] [--emit tree|json]       — run a transform pass (ADR-0094)
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
+//! hnl sdkgen c <header> --output <dir> [--target <triple>] [--only <glob>] [--config <yaml>]
+//!                                                — generate C port + adapter
 //! ```
 //!
 //! # Exit codes
@@ -141,7 +143,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     if command.is_empty() {
-        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck (alias: check), test, run, eval, transform, gen-grammar".into());
+        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck (alias: check), test, run, eval, transform, gen-grammar, sdkgen".into());
     }
     Ok(ParsedArgs {
         applier_id,
@@ -177,6 +179,8 @@ fn dispatch(p: ParsedArgs) -> i32 {
         "eval" => eval_expression(command_args.first().map(String::as_str)),
         "transform" => transform_command(&command_args),
         "gen-grammar" => gen_grammar(&kit_name, command_args.first().map(String::as_str)),
+        // SDK generator: `hnl sdkgen c <header> --output <dir> [...]`.
+        "sdkgen" => handl_plugin_ext_sdkgen::sdkgen_command(&command_args),
         // Unknown commands go through the `cli` capability dispatch.
         _ => cli_dispatch(
             &applier_id,
