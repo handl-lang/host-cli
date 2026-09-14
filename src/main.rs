@@ -33,6 +33,7 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use handl_kit_canonical::Kit;
 use handl_language::LangError;
@@ -1170,7 +1171,16 @@ fn transform_command(args: &[String]) -> i32 {
         }
     };
 
-    let engine = handl_plugin_engine_transform_rewrite::RewriteEngine::new().with_desugar_natives();
+    // Build the handl-native rewrite registry (ADR-0094) from the kit's
+    // `.hnl` modules, layer the `desugar.*` natives underneath as a
+    // fallback, and wire both into the engine. Without this, a
+    // `transforms.yaml` rule with `rule: !Native "handl:<mod>.<fn>"` errors
+    // as "unknown native" — the adapter is the production seam.
+    let handl_natives = Arc::new(kit.handl_rewrite_adapter().with_fallback(Arc::new(
+        handl_plugin_engine_transform_rewrite::native::desugar_native_registry(),
+    )));
+    let engine = handl_plugin_engine_transform_rewrite::RewriteEngine::new()
+        .with_desugar_and_handl_natives(handl_natives);
 
     if t.plan {
         // Match-only: report match sites + rule ids without rewriting.
