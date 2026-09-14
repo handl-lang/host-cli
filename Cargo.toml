@@ -7,6 +7,10 @@ edition.workspace = true
 name = "hnl"
 path = "src/main.rs"
 
+[lib]
+name = "handl_host_cli"
+path = "src/lib.rs"
+
 [dependencies]
 handl-platform.workspace = true
 handl-plugin-engine-lex-pattern.workspace = true
@@ -27,4 +31,8 @@ handl-plugin-engine-test = {path = "../plugin-engine-test" }
 handl-plugin-engine-fmt.workspace = true
 handl-plugin-lib-scheduler.workspace = true
 handl-plugin-ext-sdkgen.workspace = true
+handl-plugin-compile.workspace = true
+handl-plugin-compile-js.workspace = true
+handl-plugin-compile-llvm.workspace = true
+handl-plugin-ext-compile.workspace = true
 serde_json.workspace = true

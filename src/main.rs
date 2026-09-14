@@ -144,7 +144,7 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         i += 1;
     }
     if command.is_empty() {
-        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck (alias: check), test, run, eval, transform, gen-grammar, sdkgen".into());
+        return Err("usage: hnl <command> [args...]\ncommands: fmt, lint, typecheck (alias: check), test, run, eval, transform, compile, gen-grammar, sdkgen".into());
     }
     Ok(ParsedArgs {
         applier_id,
@@ -179,6 +179,7 @@ fn dispatch(p: ParsedArgs) -> i32 {
         "run" => run_file(command_args.first().map(String::as_str), engine.as_deref()),
         "eval" => eval_expression(command_args.first().map(String::as_str)),
         "transform" => transform_command(&command_args),
+        "compile" => compile_command(&command_args),
         "gen-grammar" => gen_grammar(&kit_name, command_args.first().map(String::as_str)),
         // SDK generator: `hnl sdkgen c <header> --output <dir> [...]`.
         "sdkgen" => handl_plugin_ext_sdkgen::sdkgen_command(&command_args),
@@ -473,12 +474,7 @@ fn typecheck_wire_prelude() -> &'static std::collections::HashSet<String> {
 /// (the Handl-authored `.hnl` model adapter, ADR-0105). The dialect routing
 /// (Contract/Arrow) is unchanged — only canonical sources reach the Handl
 /// engine.
-fn typecheck_one(
-    kit: &Kit,
-    src: &str,
-    path: &str,
-    had_failure: &mut bool,
-) -> i32 {
+fn typecheck_one(kit: &Kit, src: &str, path: &str, had_failure: &mut bool) -> i32 {
     // Route non-canonical dialects to their own loaders (ADR-0077).
     match detect_dialect(src) {
         Dialect::Contract => {
@@ -817,7 +813,9 @@ fn spec_resolves_to_file(spec: &str, bases: &[&Path]) -> bool {
     if Path::new(spec).is_absolute() {
         return file_candidate(Path::new(spec), spec).is_some();
     }
-    bases.iter().any(|base| file_candidate(&base.join(spec), spec).is_some())
+    bases
+        .iter()
+        .any(|base| file_candidate(&base.join(spec), spec).is_some())
 }
 
 fn file_candidate(joined: &Path, spec: &str) -> Option<PathBuf> {
@@ -1692,6 +1690,111 @@ fn cli_dispatch(
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// `hnl compile <target> <file> [--output <path>] [--source-map] [--debug] [--format <esm|commonjs|iife|inline|o|ir>]`
+// ---------------------------------------------------------------------------
+
+fn compile_command(args: &[String]) -> i32 {
+    let request = match handl_plugin_ext_compile::CompileFileRequest::from_args(args) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("compile: {e}");
+            return 2;
+        }
+    };
+
+    let src = match std::fs::read_to_string(&request.path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("compile: failed to read {}: {e}", request.path.display());
+            return 2;
+        }
+    };
+
+    // Minimal bootstrap: an empty `Language` and a single `module` AST node.
+    // Callers with a canonical kit can assemble a richer `Language` and `Ast`
+    // before invoking `CompileFileRequest::build_input`.
+    let lang = handl_language::Language::new();
+    let ast = handl_plugin_ext_compile::CompileFileRequest::build_ast(&src);
+    let term = handl_plugin_ext_compile::CompileFileRequest::root_term_for(&lang);
+    let report = handl_plugin_engine_typecheck::TypecheckReport::default();
+    let input = request.build_input(&src, &ast, &lang, &term, &report);
+
+    let config: Box<dyn handl_plugin_compile::CompilerConfig> = match request.target.as_str() {
+        "js" => build_js_config(&request),
+        "llvm" => build_llvm_config(&request),
+        other => {
+            eprintln!("compile: unsupported target `{other}`");
+            return 2;
+        }
+    };
+
+    let dispatcher = handl_plugin_ext_compile::CompileDispatcher::new();
+    let output = match dispatcher.compile(&request.target, input, config.as_ref()) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("compile: {e}");
+            return 1;
+        }
+    };
+
+    if let Some(path) = &request.output {
+        if let Err(e) = std::fs::write(path, output.primary_output().unwrap_or_default()) {
+            eprintln!("compile: failed to write {}: {e}", path.display());
+            return 2;
+        }
+    } else if let Err(e) = std::io::Write::write_all(
+        &mut std::io::stdout(),
+        output.primary_output().unwrap_or_default(),
+    ) {
+        eprintln!("compile: failed to write stdout: {e}");
+        return 2;
+    }
+
+    0
+}
+
+fn build_js_config(
+    req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_js::{
+        CommonJs, Deno, Esm, Iife, Inline, JsConfig, JsOutputFormat, JsTarget,
+    };
+
+    let target: Box<dyn JsTarget> = Box::new(Deno);
+    let format: Box<dyn JsOutputFormat> = match req.format.as_deref().unwrap_or("esm") {
+        "esm" => Box::new(Esm),
+        "commonjs" => Box::new(CommonJs),
+        "iife" => Box::new(Iife),
+        "inline" => Box::new(Inline),
+        other => {
+            // Unsupported format is treated like the default `esm`; the
+            // dispatcher will still run and the output can be inspected.
+            eprintln!("compile: unknown js format `{other}`, defaulting to esm");
+            Box::new(Esm)
+        }
+    };
+
+    Box::new(JsConfig {
+        target,
+        format,
+        debug: req.debug,
+        no_inline_foreign: false,
+        source_map: req.source_map,
+    })
+}
+
+fn build_llvm_config(
+    req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_llvm::{LlvmConfig, X86_64};
+
+    let mut cfg = LlvmConfig::new(Box::new(X86_64));
+    cfg.debug = req.debug;
+    cfg.emit_object = req.format.as_deref().map(|f| f == "o").unwrap_or(false);
+    Box::new(cfg)
+}
+
 // Helpers
 // ---------------------------------------------------------------------------
 
