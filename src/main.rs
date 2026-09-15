@@ -33,16 +33,22 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use handl_kit_canonical::Kit;
-use handl_language::LangError;
+use handl_language::{AstRef, LangError, Source};
+use handl_plugin_engine_lex_pattern::DataLexerEngine;
+use handl_plugin_engine_parse_pratt::PrattEngine;
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_ext_diag::{Severity, render_diagnostic, render_diagnostics};
 use handl_plugin_ext_refinement::{Dialect, detect_dialect};
+use handl_runtime::{EngineRegistry, Runtime, RuntimeConfig};
 use serde_json::{Value, json};
+
+use handl_kit_arrow_lower::lower_ast;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -1691,7 +1697,9 @@ fn cli_dispatch(
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// `hnl compile <target> <file> [--output <path>] [--source-map] [--debug] [--format <esm|commonjs|iife|inline|o|ir>]`
+// `hnl compile <target> <file> [--output <path>] [--source-map] [--debug] [--format ...] [--to hughes] [--emit json|pretty]`
+//
+// Supported targets: `js`, `llvm`, `handl`, `term`, `dot`, `sexp`.
 // ---------------------------------------------------------------------------
 
 fn compile_command(args: &[String]) -> i32 {
@@ -1711,18 +1719,78 @@ fn compile_command(args: &[String]) -> i32 {
         }
     };
 
-    // Minimal bootstrap: an empty `Language` and a single `module` AST node.
-    // Callers with a canonical kit can assemble a richer `Language` and `Ast`
-    // before invoking `CompileFileRequest::build_input`.
-    let lang = handl_language::Language::new();
-    let ast = handl_plugin_ext_compile::CompileFileRequest::build_ast(&src);
-    let term = handl_plugin_ext_compile::CompileFileRequest::root_term_for(&lang);
+    let data_kit = match handl_kit_data_canonical::assemble() {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("compile: failed to assemble canonical language: {e}");
+            return 2;
+        }
+    };
+
+    let mut registry = EngineRegistry::new();
+    registry.register_lex("data", Box::new(DataLexerEngine::new()));
+    registry.register_parse("pratt", PrattEngine::new());
+
+    let mut runtime_config = RuntimeConfig::new().with_lex("data").with_parse("pratt");
+    runtime_config.eval.clear();
+    runtime_config.typecheck.clear();
+
+    let lang = data_kit.lang().clone();
+    let runtime = match Runtime::from_registry(lang, &Rc::new(registry), &runtime_config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("compile: failed to build runtime: {e}");
+            return 2;
+        }
+    };
+
+    let source = Source::new(src.clone());
+    let tokens = match runtime.lex(&source) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("compile: lex error: {e}");
+            return 2;
+        }
+    };
+    let ast = match runtime.parse(&tokens) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("compile: parse error: {e}");
+            return 2;
+        }
+    };
+
+    if ast.is_empty() {
+        eprintln!("compile: empty AST");
+        return 2;
+    }
+
+    let root = AstRef::new(ast.len() - 1);
+    let term = match lower_ast(&ast, runtime.lang(), root) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("compile: lower error: {e}");
+            return 2;
+        }
+    };
+
     let report = handl_plugin_engine_typecheck::TypecheckReport::default();
-    let input = request.build_input(&src, &ast, &lang, &term, &report);
+    let input = handl_plugin_compile::CompilerInput::new(
+        src,
+        ast,
+        root,
+        runtime.lang().clone(),
+        term,
+        report,
+    );
 
     let config: Box<dyn handl_plugin_compile::CompilerConfig> = match request.target.as_str() {
         "js" => build_js_config(&request),
         "llvm" => build_llvm_config(&request),
+        "handl" => build_handl_config(&request),
+        "term" => build_term_config(&request),
+        "dot" => build_dot_config(&request),
+        "sexp" => build_sexp_config(&request),
         other => {
             eprintln!("compile: unsupported target `{other}`");
             return 2;
@@ -1793,6 +1861,40 @@ fn build_llvm_config(
     cfg.debug = req.debug;
     cfg.emit_object = req.format.as_deref().map(|f| f == "o").unwrap_or(false);
     Box::new(cfg)
+}
+
+fn build_handl_config(
+    req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_handl::HandlConfig;
+
+    let to = req.to.as_deref().unwrap_or("hughes").to_string();
+    Box::new(HandlConfig::new(to))
+}
+
+fn build_term_config(
+    req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_term::TermConfig;
+
+    let emit = req.emit.as_deref().unwrap_or("json").to_string();
+    Box::new(TermConfig::new(emit))
+}
+
+fn build_dot_config(
+    _req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_dot::DotConfig;
+
+    Box::new(DotConfig::new())
+}
+
+fn build_sexp_config(
+    _req: &handl_plugin_ext_compile::CompileFileRequest,
+) -> Box<dyn handl_plugin_compile::CompilerConfig> {
+    use handl_plugin_compile_sexp::SexpConfig;
+
+    Box::new(SexpConfig::new())
 }
 
 // Helpers

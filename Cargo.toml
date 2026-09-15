@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 handl-platform.workspace = true
+handl-runtime.workspace = true
 handl-plugin-engine-lex-pattern.workspace = true
 handl-plugin-engine-parse.workspace = true
 handl-plugin-engine-parse-pratt.workspace = true
@@ -20,6 +21,8 @@ handl-plugin-engine-transform-rewrite.workspace = true
 handl-plugin-ext-cli.workspace = true
 handl-plugin-applier-bootstrap.workspace = true
 handl-kit-canonical.workspace = true
+handl-kit-data.workspace = true
+handl-kit-data-canonical.workspace = true
 handl-language.workspace = true
 handl-host-tooling.workspace = true
 handl-plugin-ext-fmt.workspace = true
@@ -27,12 +30,17 @@ handl-plugin-ext-lint.workspace = true
 handl-plugin-ext-diag.workspace = true
 handl-plugin-engine-typecheck.workspace = true
 handl-plugin-ext-refinement.workspace = true
-handl-plugin-engine-test = {path = "../plugin-engine-test" }
+handl-plugin-engine-test = { path = "../plugin-engine-test" }
 handl-plugin-engine-fmt.workspace = true
 handl-plugin-lib-scheduler.workspace = true
 handl-plugin-ext-sdkgen.workspace = true
 handl-plugin-compile.workspace = true
 handl-plugin-compile-js.workspace = true
 handl-plugin-compile-llvm.workspace = true
+handl-plugin-compile-handl.workspace = true
+handl-plugin-compile-term.workspace = true
+handl-plugin-compile-dot.workspace = true
+handl-plugin-compile-sexp.workspace = true
+handl-kit-arrow-lower.workspace = true
 handl-plugin-ext-compile.workspace = true
 serde_json.workspace = true
