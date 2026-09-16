@@ -10,7 +10,7 @@ use handl_kit_canonical::Kit;
 use handl_language::{Ast, AstNode, AstRef, LangError};
 use handl_plugin_engine_fmt::FormatEngine;
 use handl_plugin_engine_lex_pattern;
-use handl_plugin_engine_parse::ParserRequest;
+use handl_plugin_engine_parse::{ParserEngine, ParserRequest};
 use handl_plugin_engine_parse_pratt::PrattEngine;
 use serde_json::{Value, json};
 
@@ -412,7 +412,7 @@ fn apply_rules_to_chain(
                 }
                 if ok {
                     let tgt_ref = copy_subtree(rule_ast, rule.target, out);
-                    let mut tgt_chain = if out.get(tgt_ref).map(|n| n.kind == "flow").unwrap_or(false) {
+                    let tgt_chain = if out.get(tgt_ref).map(|n| n.kind == "flow").unwrap_or(false) {
                         flatten_flow(out, tgt_ref)
                     } else {
                         vec![tgt_ref]
