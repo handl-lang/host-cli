@@ -31,13 +31,14 @@
 //! | 1    | check/lint/test/fmt-check failure |
 //! | 2    | usage or parse error |
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use handl_kit_canonical::Kit;
-use handl_language::{AstRef, LangError, Source};
+use handl_language::{AstRef, LangError, Language, Source};
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_engine_lex_pattern::DataLexerEngine;
@@ -222,18 +223,53 @@ fn dispatch(p: ParsedArgs) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// `hnl fmt [--check] [--write] [paths...]`
+// `hnl fmt [--check] [--write] [--prelude <path>] [--language <name>] [paths...]`
 // ---------------------------------------------------------------------------
+
+fn load_prelude(path: &str) -> Result<HashSet<String>, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read prelude file {path}: {e}"))?;
+    Ok(text
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
+fn load_canonical_language() -> Result<Language, String> {
+    Ok(handl_kit_data_canonical::assemble()
+        .map_err(|e| format!("failed to assemble canonical language: {e}"))?
+        .lang()
+        .clone())
+}
 
 fn fmt_command(args: &[String]) -> i32 {
     let mut check = false;
     let mut write = false;
+    let mut language: Option<String> = None;
     let mut paths = Vec::new();
 
-    for arg in args {
-        match arg.as_str() {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--check" => check = true,
             "--write" => write = true,
+            "--prelude" => {
+                // Accepted for CLI consistency with `lint`; it has no effect on formatting.
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("fmt: --prelude requires a value");
+                    return 2;
+                }
+            }
+            "--language" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("fmt: --language requires a value");
+                    return 2;
+                }
+                language = Some(args[i].clone());
+            }
             "--" => {}
             s if s.starts_with("--") => {
                 eprintln!("fmt: unknown flag `{s}`");
@@ -241,11 +277,18 @@ fn fmt_command(args: &[String]) -> i32 {
             }
             s => paths.push(s.to_string()),
         }
+        i += 1;
     }
 
     if check && write {
         eprintln!("fmt: --check and --write are mutually exclusive");
         return 2;
+    }
+    if let Some(lang) = language {
+        if lang != "canonical" {
+            eprintln!("custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs");
+            return 2;
+        }
     }
 
     let mut had_failure = false;
@@ -326,18 +369,37 @@ fn fmt_one(src: &str, path: &str, check: bool, write: bool, had_failure: &mut bo
 }
 
 // ---------------------------------------------------------------------------
-// `hnl lint [--fix] [--fail-on-warn] [paths...]`
+// `hnl lint [--fix] [--fail-on-warn] [--prelude <path>] [--language <name>] [paths...]`
 // ---------------------------------------------------------------------------
 
 fn lint_command(args: &[String]) -> i32 {
     let mut fix = false;
     let mut fail_on_warn = false;
+    let mut prelude_path: Option<String> = None;
+    let mut language: Option<String> = None;
     let mut paths = Vec::new();
 
-    for arg in args {
-        match arg.as_str() {
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
             "--fix" => fix = true,
             "--fail-on-warn" => fail_on_warn = true,
+            "--prelude" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("lint: --prelude requires a value");
+                    return 2;
+                }
+                prelude_path = Some(args[i].clone());
+            }
+            "--language" => {
+                i += 1;
+                if i >= args.len() {
+                    eprintln!("lint: --language requires a value");
+                    return 2;
+                }
+                language = Some(args[i].clone());
+            }
             "--" => {}
             s if s.starts_with("--") => {
                 eprintln!("lint: unknown flag `{s}`");
@@ -345,7 +407,38 @@ fn lint_command(args: &[String]) -> i32 {
             }
             s => paths.push(s.to_string()),
         }
+        i += 1;
     }
+
+    if let Some(ref lang) = language {
+        if lang != "canonical" {
+            eprintln!("custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs");
+            return 2;
+        }
+    }
+
+    let use_with_language = prelude_path.is_some() || language.is_some();
+    let prelude = match prelude_path {
+        Some(path) => match load_prelude(&path) {
+            Ok(set) => set,
+            Err(msg) => {
+                eprintln!("lint: {msg}");
+                return 2;
+            }
+        },
+        None => typecheck_wire_prelude().clone(),
+    };
+    let lang = if use_with_language {
+        match load_canonical_language() {
+            Ok(l) => Some(l),
+            Err(msg) => {
+                eprintln!("lint: {msg}");
+                return 2;
+            }
+        }
+    } else {
+        None
+    };
 
     let mut had_failure = false;
 
@@ -355,7 +448,7 @@ fn lint_command(args: &[String]) -> i32 {
             eprintln!("lint: failed to read stdin");
             return 2;
         }
-        let code = lint_one(&src, "<stdin>", fix, fail_on_warn, &mut had_failure);
+        let code = lint_one(&src, "<stdin>", fix, fail_on_warn, &mut had_failure, &prelude, lang.as_ref());
         if code == 2 {
             return 2;
         }
@@ -370,7 +463,7 @@ fn lint_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = lint_one(&src, path, fix, fail_on_warn, &mut had_failure);
+        let code = lint_one(&src, path, fix, fail_on_warn, &mut had_failure, &prelude, lang.as_ref());
         if code == 2 {
             return 2;
         }
@@ -381,16 +474,27 @@ fn lint_command(args: &[String]) -> i32 {
 
 /// Lint a single source. Returns 2 on parse error; sets `had_failure` for
 /// Error diagnostics (or Warning when `fail_on_warn`).
-fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &mut bool) -> i32 {
+fn lint_one(
+    src: &str,
+    path: &str,
+    fix: bool,
+    fail_on_warn: bool,
+    had_failure: &mut bool,
+    prelude: &HashSet<String>,
+    lang: Option<&Language>,
+) -> i32 {
     if detect_dialect(src) != Dialect::Canonical {
         eprintln!("skipping dialect file: {path}");
         return 0;
     }
 
     // `unbound-wire` is delegated to the bootstrap typechecker's scope pass;
-    // seed it with the same wire prelude `hnl typecheck` uses (ADR-0096).
-    let diags = match handl_plugin_ext_lint::lint_source_with_prelude(src, typecheck_wire_prelude())
-    {
+    // seed it with the wire prelude supplied by the host (canonical or user).
+    let lint_result = match lang {
+        Some(lang) => handl_plugin_ext_lint::lint_source_with_prelude_and_language(lang, src, prelude),
+        None => handl_plugin_ext_lint::lint_source_with_prelude(src, prelude),
+    };
+    let diags = match lint_result {
         Ok(d) => d,
         Err(err) => {
             eprintln!("{path}: parse error: {err}");
@@ -410,7 +514,7 @@ fn lint_one(src: &str, path: &str, fix: bool, fail_on_warn: bool, had_failure: &
     }
 
     if fix {
-        match handl_plugin_ext_lint::fix_source_with_prelude(src, typecheck_wire_prelude()) {
+        match handl_plugin_ext_lint::fix_source_with_prelude(src, prelude) {
             Ok(fixed) => {
                 if let Err(e) = write_atomic(path, &fixed) {
                     eprintln!("lint: failed to write {path}: {e}");
@@ -930,13 +1034,6 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         return 1;
     }
 
-    // Auto-transform N-dimensional arrow optimization modules.
-    let transformed = apply_run_transform(&source);
-    let source = match transformed {
-        Some(s) => s,
-        None => source,
-    };
-
     // Resolution bases for `from "<spec>"` declaration lines, mirroring
     // `ModuleLoader` order: the entry file's directory, the module root,
     // then the process working directory. A `from` line whose specifier
@@ -975,119 +1072,6 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
             1
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Auto-transform helpers for `hnl run` (ADR-0119 N-dimensional arrows).
-// ---------------------------------------------------------------------------
-
-/// If the module looks like an N-dimensional arrow optimization demo,
-/// append a record that reports the original and optimized 1-cell pipeline
-/// using the declared string-valued `~[2]~>` rewrite rules.  This is a pure
-// source-level rewrite — no effects are executed here.
-fn apply_run_transform(src: &str) -> Option<String> {
-    // Leave files that already end with a record/object literal untouched.
-    if src.trim_end().ends_with('}') {
-        return None;
-    }
-
-    // Find the `round_trip` 1-cell pipeline (string literal or expression text).
-    let mut original: Option<String> = None;
-    for line in src.lines() {
-        let Some((name, rhs)) = line.split_once(":=") else { continue };
-        if name.trim() != "round_trip" {
-            continue;
-        }
-        let rhs = rhs.split("--").next().unwrap_or(rhs).trim().to_string();
-        if rhs.starts_with('"') {
-            if let Some(s) = extract_quoted_string(&rhs) {
-                original = Some(s);
-            }
-        } else if !rhs.is_empty() {
-            original = Some(rhs);
-        }
-    }
-    let original = original?;
-
-    // Collect 2-cell string rewrite rules: `name := "from" ~[2]~> "to"`.
-    let mut rules: Vec<(String, String, String)> = Vec::new();
-    for line in src.lines() {
-        let Some((name, rest)) = line.split_once(":=") else { continue };
-        let name = name.trim();
-        let rest = rest.trim();
-        let Some(marker) = rest.find("~[2]~>") else { continue };
-        let from_part = &rest[..marker];
-        let to_part = &rest[marker + "~[2]~>".len()..];
-        let from = extract_quoted_string(from_part)?;
-        let to = extract_quoted_string(to_part)?;
-        rules.push((name.to_string(), from, to));
-    }
-    if rules.is_empty() {
-        return None;
-    }
-
-    // Apply the rules repeatedly (left-to-right, bounded fixpoint).
-    let mut optimized = original.clone();
-    for _ in 0..16 {
-        let mut changed = false;
-        for (_, from, to) in &rules {
-            let next = optimized.replacen(from, to, 1);
-            if next != optimized {
-                optimized = next;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-
-    let mut out = src.to_string();
-    out.push_str("\n\n");
-    out.push_str(&format!(
-        "__original_pipeline := \"{}\"\n",
-        escape_handl_string(&original)
-    ));
-    out.push_str(&format!(
-        "__optimized_pipeline := \"{}\"\n",
-        escape_handl_string(&optimized)
-    ));
-    let rule_entries: Vec<String> = rules
-        .iter()
-        .map(|(name, _, _)| {
-            format!(
-                "{{ name: \"{name}\", from: {name}.inputs, to: {name}.output, dimension: 2 }}"
-            )
-        })
-        .collect();
-    out.push_str(&format!("__rules_list := [ {} ]\n", rule_entries.join(", ")));
-    out.push_str("{\n");
-    out.push_str("  use_http: use_http,\n");
-    out.push_str("  url: url,\n");
-    out.push_str("  original: __original_pipeline,\n");
-    out.push_str("  optimized: __optimized_pipeline,\n");
-    out.push_str("  dimension: 2,\n");
-    out.push_str("  rules: __rules_list,\n");
-    out.push_str("  sample: {\n");
-    out.push_str("    raw_file: file_text,\n");
-    out.push_str("    parsed_file: file_parsed,\n");
-    out.push_str("    round_trip: json_round_trip\n");
-    out.push_str("  },\n");
-    out.push_str(
-        "  note: \"http.get is live when use_http is true; parse/serialize come from handl-packages/json_lib; read_file comes from handl-packages/fs.\"\n",
-    );
-    out.push_str("}\n");
-    Some(out)
-}
-
-fn extract_quoted_string(s: &str) -> Option<String> {
-    let start = s.find('"')? + 1;
-    let end = s[start..].find('"')? + start;
-    Some(s[start..end].to_string())
-}
-
-fn escape_handl_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 // ---------------------------------------------------------------------------

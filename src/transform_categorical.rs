@@ -19,7 +19,6 @@ use serde_json::{Value, json};
 struct StatementInfo {
     source: String,
     start: usize,
-    end: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -176,7 +175,6 @@ fn split_statements(src: &str) -> Vec<StatementInfo> {
                 chunks.push(StatementInfo {
                     source: src[trim_start..trim_end].to_string(),
                     start: trim_start,
-                    end: trim_end,
                 });
             }
             i += 1;
@@ -192,7 +190,6 @@ fn split_statements(src: &str) -> Vec<StatementInfo> {
         chunks.push(StatementInfo {
             source: src[trim_start..trim_end].to_string(),
             start: trim_start,
-            end: trim_end,
         });
     }
     chunks
@@ -244,8 +241,8 @@ fn collect_dim2_rules_at(ast_index: usize, ast: &Ast, root: AstRef, rules: &mut 
                         if dim_is_two(ast, AstRef::new(d as usize)) {
                             rules.push(Rule {
                                 ast_index,
-                                source: AstRef::new(s as usize),
-                                target: AstRef::new(t as usize),
+                                source: unwrap_paren(ast, AstRef::new(s as usize)),
+                                target: unwrap_paren(ast, AstRef::new(t as usize)),
                             });
                         }
                     }
@@ -268,14 +265,32 @@ fn collect_dim2_rules_at(ast_index: usize, ast: &Ast, root: AstRef, rules: &mut 
 fn dim_is_two(ast: &Ast, r: AstRef) -> bool {
     ast.get(r).map_or(false, |n| {
         if n.kind == "value" {
-            if let Some(v) = n.payload.get("value") {
-                if let Some(n) = v.as_u64() {
-                    return n == 2;
+            n.payload.as_u64() == Some(2)
+                || n.payload.as_i64() == Some(2)
+                || n.payload.as_str() == Some("2")
+        } else {
+            false
+        }
+    })
+}
+
+fn unwrap_paren(ast: &Ast, root: AstRef) -> AstRef {
+    match ast.get(root) {
+        Some(node) if node.kind == "paren" => {
+            if let Some(body) = node.payload.get("body").and_then(|b| b.as_u64()) {
+                unwrap_paren(ast, AstRef::new(body as usize))
+            } else if let Some(children) = node.payload.get("children").and_then(|c| c.as_array()) {
+                if let Some(first) = children.first().and_then(|v| v.as_u64()) {
+                    unwrap_paren(ast, AstRef::new(first as usize))
+                } else {
+                    root
                 }
+            } else {
+                root
             }
         }
-        false
-    })
+        _ => root,
+    }
 }
 
 fn round_trip_value(ast: &Ast, root: AstRef) -> Option<AstRef> {
@@ -286,12 +301,8 @@ fn round_trip_value(ast: &Ast, root: AstRef) -> Option<AstRef> {
                 let target = children[0].as_u64()? as usize;
                 let value = children[1].as_u64()? as usize;
                 if let Some(tnode) = ast.get(AstRef::new(target)) {
-                    if tnode.kind == "var" {
-                        if let Some(name) = tnode.payload.get("name").and_then(|n| n.as_str()) {
-                            if name == "round_trip" {
-                                return Some(AstRef::new(value));
-                            }
-                        }
+                    if tnode.kind == "var" && tnode.payload.as_str() == Some("round_trip") {
+                        return Some(AstRef::new(value));
                     }
                 }
             }
@@ -398,10 +409,10 @@ fn apply_rules_to_chain(
         for rule in rules {
             let rule_ast = &rules_stmts[rule.ast_index].0;
             let src_flat = flatten_flow(rule_ast, rule.source);
-            if src_flat.is_empty() {
+            if src_flat.is_empty() || src_flat.len() > cur.len() {
                 continue;
             }
-            for start in 0..=cur.len().saturating_sub(src_flat.len()) {
+            for start in 0..=cur.len() - src_flat.len() {
                 let slice = &cur[start..start + src_flat.len()];
                 let mut ok = true;
                 for (i, s) in src_flat.iter().enumerate() {
