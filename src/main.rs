@@ -38,10 +38,10 @@ use std::sync::Arc;
 
 use handl_kit_canonical::Kit;
 use handl_language::{AstRef, LangError, Source};
-use handl_plugin_engine_lex_pattern::DataLexerEngine;
-use handl_plugin_engine_parse_pratt::PrattEngine;
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
+use handl_plugin_engine_lex_pattern::DataLexerEngine;
+use handl_plugin_engine_parse_pratt::PrattEngine;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_ext_diag::{Severity, render_diagnostic, render_diagnostics};
 use handl_plugin_ext_refinement::{Dialect, detect_dialect};
@@ -111,6 +111,25 @@ fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
             continue;
         }
         match arg.as_str() {
+            "--help" | "-h" | "help" => {
+                println!(
+                    "usage: hnl <command> [args...]\n\
+                     \n\
+                     commands:\n\
+                     \x20 fmt [--check] [--write] [paths...]      format files\n\
+                     \x20 lint [--fix] [--fail-on-warn] [paths...] lint files\n\
+                     \x20 typecheck [paths...] (alias: check)      typecheck files\n\
+                     \x20 test [--list] [--filter <pat>] [paths...] run tests\n\
+                     \x20 run <file.hnl>                           run a file\n\
+                     \x20 eval '<expression>'                      evaluate an expression\n\
+                     \x20 transform <pass> <file.hnl>              run a transform pass\n\
+                     \x20 gen-grammar [output_path]                generate TextMate grammar\n\
+                     \n\
+                     global flags: --applier <id> --config <path> --kit <name> --engine <name>"
+                );
+                std::process::exit(0);
+            }
+
             "--applier" => {
                 i += 1;
                 applier_id = args
