@@ -50,6 +50,8 @@ use serde_json::{Value, json};
 
 use handl_kit_arrow_lower::lower_ast;
 
+mod transform_categorical;
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -922,6 +924,19 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         },
     };
 
+    // Typecheck before running.
+    if let Err(err) = kit.typecheck_handl(&source) {
+        eprintln!("run: typecheck failed: {err}");
+        return 1;
+    }
+
+    // Auto-transform N-dimensional arrow optimization modules.
+    let transformed = apply_run_transform(&source);
+    let source = match transformed {
+        Some(s) => s,
+        None => source,
+    };
+
     // Resolution bases for `from "<spec>"` declaration lines, mirroring
     // `ModuleLoader` order: the entry file's directory, the module root,
     // then the process working directory. A `from` line whose specifier
@@ -960,6 +975,119 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
             1
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Auto-transform helpers for `hnl run` (ADR-0119 N-dimensional arrows).
+// ---------------------------------------------------------------------------
+
+/// If the module looks like an N-dimensional arrow optimization demo,
+/// append a record that reports the original and optimized 1-cell pipeline
+/// using the declared string-valued `~[2]~>` rewrite rules.  This is a pure
+// source-level rewrite — no effects are executed here.
+fn apply_run_transform(src: &str) -> Option<String> {
+    // Leave files that already end with a record/object literal untouched.
+    if src.trim_end().ends_with('}') {
+        return None;
+    }
+
+    // Find the `round_trip` 1-cell pipeline (string literal or expression text).
+    let mut original: Option<String> = None;
+    for line in src.lines() {
+        let Some((name, rhs)) = line.split_once(":=") else { continue };
+        if name.trim() != "round_trip" {
+            continue;
+        }
+        let rhs = rhs.split("--").next().unwrap_or(rhs).trim().to_string();
+        if rhs.starts_with('"') {
+            if let Some(s) = extract_quoted_string(&rhs) {
+                original = Some(s);
+            }
+        } else if !rhs.is_empty() {
+            original = Some(rhs);
+        }
+    }
+    let original = original?;
+
+    // Collect 2-cell string rewrite rules: `name := "from" ~[2]~> "to"`.
+    let mut rules: Vec<(String, String, String)> = Vec::new();
+    for line in src.lines() {
+        let Some((name, rest)) = line.split_once(":=") else { continue };
+        let name = name.trim();
+        let rest = rest.trim();
+        let Some(marker) = rest.find("~[2]~>") else { continue };
+        let from_part = &rest[..marker];
+        let to_part = &rest[marker + "~[2]~>".len()..];
+        let from = extract_quoted_string(from_part)?;
+        let to = extract_quoted_string(to_part)?;
+        rules.push((name.to_string(), from, to));
+    }
+    if rules.is_empty() {
+        return None;
+    }
+
+    // Apply the rules repeatedly (left-to-right, bounded fixpoint).
+    let mut optimized = original.clone();
+    for _ in 0..16 {
+        let mut changed = false;
+        for (_, from, to) in &rules {
+            let next = optimized.replacen(from, to, 1);
+            if next != optimized {
+                optimized = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let mut out = src.to_string();
+    out.push_str("\n\n");
+    out.push_str(&format!(
+        "__original_pipeline := \"{}\"\n",
+        escape_handl_string(&original)
+    ));
+    out.push_str(&format!(
+        "__optimized_pipeline := \"{}\"\n",
+        escape_handl_string(&optimized)
+    ));
+    let rule_entries: Vec<String> = rules
+        .iter()
+        .map(|(name, _, _)| {
+            format!(
+                "{{ name: \"{name}\", from: {name}.inputs, to: {name}.output, dimension: 2 }}"
+            )
+        })
+        .collect();
+    out.push_str(&format!("__rules_list := [ {} ]\n", rule_entries.join(", ")));
+    out.push_str("{\n");
+    out.push_str("  use_http: use_http,\n");
+    out.push_str("  url: url,\n");
+    out.push_str("  original: __original_pipeline,\n");
+    out.push_str("  optimized: __optimized_pipeline,\n");
+    out.push_str("  dimension: 2,\n");
+    out.push_str("  rules: __rules_list,\n");
+    out.push_str("  sample: {\n");
+    out.push_str("    raw_file: file_text,\n");
+    out.push_str("    parsed_file: file_parsed,\n");
+    out.push_str("    round_trip: json_round_trip\n");
+    out.push_str("  },\n");
+    out.push_str(
+        "  note: \"http.get is live when use_http is true; parse/serialize come from handl-packages/json_lib; read_file comes from handl-packages/fs.\"\n",
+    );
+    out.push_str("}\n");
+    Some(out)
+}
+
+fn extract_quoted_string(s: &str) -> Option<String> {
+    let start = s.find('"')? + 1;
+    let end = s[start..].find('"')? + start;
+    Some(s[start..end].to_string())
+}
+
+fn escape_handl_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 // ---------------------------------------------------------------------------
@@ -1112,6 +1240,15 @@ fn transform_command(args: &[String]) -> i32 {
         if it.next().is_some() {
             eprintln!("transform: too many positional arguments");
             return 2;
+        }
+    }
+
+    // Categorical two-file mode: `hnl transform <rules.hnl> <program.hnl>`.
+    // The first positional ends in `.hnl` and exists, so route to the
+    // prototype categorical rewrites rather than the named-pass engine.
+    if let (Some(rules_path), Some(prog_path)) = (&t.pass, &t.file) {
+        if rules_path.ends_with(".hnl") && prog_path.ends_with(".hnl") {
+            return transform_categorical::run(rules_path, prog_path);
         }
     }
 
