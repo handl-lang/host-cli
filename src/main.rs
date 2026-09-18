@@ -286,7 +286,9 @@ fn fmt_command(args: &[String]) -> i32 {
     }
     if let Some(lang) = language {
         if lang != "canonical" {
-            eprintln!("custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs");
+            eprintln!(
+                "custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs"
+            );
             return 2;
         }
     }
@@ -412,7 +414,9 @@ fn lint_command(args: &[String]) -> i32 {
 
     if let Some(ref lang) = language {
         if lang != "canonical" {
-            eprintln!("custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs");
+            eprintln!(
+                "custom languages are not yet supported by the CLI; use the programmatic `_with_language` APIs"
+            );
             return 2;
         }
     }
@@ -448,7 +452,15 @@ fn lint_command(args: &[String]) -> i32 {
             eprintln!("lint: failed to read stdin");
             return 2;
         }
-        let code = lint_one(&src, "<stdin>", fix, fail_on_warn, &mut had_failure, &prelude, lang.as_ref());
+        let code = lint_one(
+            &src,
+            "<stdin>",
+            fix,
+            fail_on_warn,
+            &mut had_failure,
+            &prelude,
+            lang.as_ref(),
+        );
         if code == 2 {
             return 2;
         }
@@ -463,7 +475,15 @@ fn lint_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = lint_one(&src, path, fix, fail_on_warn, &mut had_failure, &prelude, lang.as_ref());
+        let code = lint_one(
+            &src,
+            path,
+            fix,
+            fail_on_warn,
+            &mut had_failure,
+            &prelude,
+            lang.as_ref(),
+        );
         if code == 2 {
             return 2;
         }
@@ -491,7 +511,9 @@ fn lint_one(
     // `unbound-wire` is delegated to the bootstrap typechecker's scope pass;
     // seed it with the wire prelude supplied by the host (canonical or user).
     let lint_result = match lang {
-        Some(lang) => handl_plugin_ext_lint::lint_source_with_prelude_and_language(lang, src, prelude),
+        Some(lang) => {
+            handl_plugin_ext_lint::lint_source_with_prelude_and_language(lang, src, prelude)
+        }
         None => handl_plugin_ext_lint::lint_source_with_prelude(src, prelude),
     };
     let diags = match lint_result {
@@ -912,8 +934,10 @@ fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
             let inner = rest.trim_start();
             return !inner.starts_with('"') && !inner.starts_with('\'');
         }
-        // `import"x"` (no space) — treat as the executable form too.
-        return !rest.starts_with('"') && !rest.starts_with('\'');
+        // `import` directly followed by a non-space char is an identifier
+        // (`imported_and`) or the quoted executable form (`import"x"` —
+        // kept either way): never a strippable declaration.
+        return false;
     }
     if let Some(rest) = trimmed.strip_prefix("from") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
@@ -1028,10 +1052,14 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         },
     };
 
-    // Typecheck before running.
-    if let Err(err) = kit.typecheck_handl(&source) {
-        eprintln!("run: typecheck failed: {err}");
-        return 1;
+    // Typecheck before running. Canonical-dialect sources go through the
+    // embedded Handl model; non-canonical dialects (Contract/Arrow) are
+    // checked by their own loaders, same routing as `hnl typecheck`.
+    if detect_dialect(&source) == Dialect::Canonical {
+        if let Err(err) = kit.typecheck_handl(&source) {
+            eprintln!("run: typecheck failed: {err}");
+            return 1;
+        }
     }
 
     // Resolution bases for `from "<spec>"` declaration lines, mirroring
@@ -1057,14 +1085,44 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
 
     let source = strip_import_declarations(&source, &bases);
     let trimmed = source.trim_start();
-    let source = if trimmed.starts_with("do") {
+    let wrapped = if trimmed.starts_with("do") {
         source.to_string()
     } else {
         format!("do {{\n{}\n}}", source)
     };
-    match kit.eval(&source) {
+
+    // Parse, apply the module's own ~[2]~> rules, then eval the optimized AST.
+    let ast = match kit.parse(&wrapped) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("run: parse failed: {e}");
+            return 1;
+        }
+    };
+    let lang = kit.runtime().lang();
+    // Bound names = module bindings + the wire names the module chain
+    // supplies at eval time (stripped `from "pkg" import ...` lines are
+    // not in the AST, but their names are still literal references, not
+    // pattern variables).
+    let mut bound = transform_categorical::bound_names(&ast, lang);
+    bound.extend(typecheck_wire_prelude().iter().cloned());
+    let env = transform_categorical::dim_env(&ast, lang);
+    let rules = transform_categorical::collect_rules(&ast, &bound, &env, lang);
+    let protected = Arc::new(transform_categorical::dim_arrow_subtrees(&ast));
+    let engine = handl_plugin_engine_transform_rewrite::RewriteEngine::new().with_native_registry(
+        transform_categorical::native(rules, protected, Arc::new(env)),
+    );
+    let out = match engine.run_pass(lang, &ast, AstRef::new(ast.len() - 1), "n_dim_opt") {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("run: optimization pass failed: {e}");
+            return 1;
+        }
+    };
+
+    match kit.runtime().eval(&out.ast) {
         Ok(value) => {
-            print_value(&value);
+            print_value(&value, lang, Some(wrapped.as_str()));
             0
         }
         Err(e) => {
@@ -1102,9 +1160,10 @@ fn eval_expression(expr: Option<&str>) -> i32 {
     // user expression in a `do` block so semicolon-separated commands such as
     // `from "transform" import * as transform; transform.map(...)` evaluate as a sequence.
     let wrapped = format!("do {{ {} }}", expr);
+    let lang = kit.runtime().lang();
     match kit.eval(&wrapped) {
         Ok(value) => {
-            print_value(&value);
+            print_value(&value, lang, Some(wrapped.as_str()));
             0
         }
         Err(e) => {
@@ -2052,15 +2111,237 @@ fn write_atomic(path: &str, content: &str) -> std::io::Result<()> {
 }
 
 /// Print a `serde_json::Value` the way the CLI presents eval/run results: bare
-/// strings are printed without quotes, everything else as pretty-printed JSON.
-fn print_value(value: &Value) {
+/// strings are printed without quotes, arrow values as their compact term
+/// (`left >>> right` for composites, the `body_def` source for literals),
+/// everything else as pretty-printed JSON.
+fn print_value(value: &Value, lang: &Language, source: Option<&str>) {
     if let Some(s) = value.as_str() {
+        println!("{s}");
+    } else if let Some(s) = arrow_display(value, lang, source, None, 0) {
         println!("{s}");
     } else {
         println!(
             "{}",
-            serde_json::to_string_pretty(value).unwrap_or_default()
+            serde_json::to_string_pretty(&compact_arrows(value, lang, source)).unwrap_or_default()
         );
+    }
+}
+
+/// Recursively replace arrow values nested inside records/arrays with
+/// their compact term display, so `hnl run` output stays readable.
+fn compact_arrows(value: &Value, lang: &Language, source: Option<&str>) -> Value {
+    if let Some(s) = arrow_display(value, lang, source, None, 0) {
+        return Value::String(s);
+    }
+    match value {
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .map(|(k, v)| (k.clone(), compact_arrows(v, lang, source)))
+                .collect(),
+        ),
+        Value::Array(a) => {
+            Value::Array(a.iter().map(|v| compact_arrows(v, lang, source)).collect())
+        }
+        _ => value.clone(),
+    }
+}
+
+/// Compact display for an arrow value.
+///
+/// - A composite built by `>>>` captures its components in `env` as
+///   `__left__`/`__right__` and prints as `left >>> right`. Components that
+///   were unbound names evaluate to their name string (first-class name
+///   references), so `fetch >>> serialize >>> parse` prints as written.
+/// - A graded arrow (`{"__tag__": "Arrow", "grade": N, "inputs", "output"}`)
+///   prints as `(inputs) ~[N]~> (output)`.
+/// - A leaf arrow prints as the name it is bound under when `scope` still
+///   holds that name for the same definition, otherwise as
+///   `params ~> body` rendered from `body_def` (source text when spans are
+///   available, else the data-driven formatter).
+fn arrow_display(
+    value: &Value,
+    lang: &Language,
+    source: Option<&str>,
+    scope: Option<&serde_json::Map<String, Value>>,
+    depth: usize,
+) -> Option<String> {
+    if depth > 16 {
+        return Some("...".to_string());
+    }
+    // First-class name references: unbound vars evaluate to their name string.
+    if let Value::String(s) = value {
+        return Some(s.clone());
+    }
+    let obj = value.as_object()?;
+    let is_plain = obj.get("__arrow__").and_then(|v| v.as_bool()) == Some(true);
+    let is_graded = obj.get("__tag__").and_then(|v| v.as_str()) == Some("Arrow")
+        && obj.get("grade").is_some()
+        && obj.get("inputs").is_some()
+        && obj.get("output").is_some();
+    if !is_plain && !is_graded {
+        return None;
+    }
+    let env = obj.get("env").and_then(|e| e.as_object());
+    // A name bound in scope for this same definition wins over expansion.
+    for e in scope.into_iter().chain(env.iter().copied()) {
+        for (name, val) in e {
+            if !name.starts_with("__") && def_eq(val, value, 0) {
+                return Some(name.clone());
+            }
+        }
+    }
+    if is_graded {
+        // Graded arrows carry no env of their own; the evaluated `inputs`
+        // side does, and it captured the ambient scope — use it so named
+        // arrows on either side print by name.
+        let inner_scope = env.or_else(|| {
+            obj.get("inputs")
+                .and_then(|i| i.get("env"))
+                .and_then(|e| e.as_object())
+        });
+        // The `dim` slot is a normal expression — `~[a >>> b]~>`, `~[N]~>`,
+        // `~[f(x)]~>` — so the grade may be any value, not just a literal.
+        let grade = term_display(
+            obj.get("grade").unwrap(),
+            lang,
+            source,
+            inner_scope,
+            depth + 1,
+        );
+        let i = term_display(&obj["inputs"], lang, source, inner_scope, depth + 1);
+        let o = term_display(&obj["output"], lang, source, inner_scope, depth + 1);
+        return Some(format!(
+            "{} ~[{grade}]~> {}",
+            paren_if_term(&i),
+            paren_if_term(&o)
+        ));
+    }
+    let left = env.and_then(|e| e.get("__left__"));
+    let right = env.and_then(|e| e.get("__right__"));
+    if let (Some(l), Some(r)) = (left, right) {
+        let ls = term_display(l, lang, source, env, depth + 1);
+        let rs_raw = term_display(r, lang, source, env, depth + 1);
+        return Some(format!("{ls} >>> {}", paren_if_term(&rs_raw)));
+    }
+    // Leaf arrow: `params ~> body`.
+    let params = obj
+        .get("params")
+        .and_then(|p| p.as_array())
+        .map(|p| {
+            p.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    if let Some(def) = obj.get("body_def").and_then(handl_language::as_ast) {
+        if !def.is_empty() {
+            let root = AstRef::new(def.len() - 1);
+            let body = source
+                .zip(def.at(root).ok().and_then(|n| n.span))
+                .and_then(|(src, span)| src.get(span.start..span.end))
+                .map(|s| s.trim().to_string())
+                .or_else(|| {
+                    handl_plugin_engine_fmt::FormatEngine::new()
+                        .format(lang, &def, root)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                });
+            if let Some(b) = body {
+                return Some(format!("{params} ~> {b}"));
+            }
+        }
+    }
+    Some("<arrow>".to_string())
+}
+
+/// Display a term-position value: arrows get [`arrow_display`]; a bare
+/// string is a name reference and prints raw; other values resolve to a
+/// bound name via the captured scope (e.g. `a` for `2` in `a >>> b`), or
+/// fall back to a compact literal.
+fn term_display(
+    value: &Value,
+    lang: &Language,
+    source: Option<&str>,
+    scope: Option<&serde_json::Map<String, Value>>,
+    depth: usize,
+) -> String {
+    if let Some(s) = arrow_display(value, lang, source, scope, depth) {
+        return s;
+    }
+    if let Value::String(s) = value {
+        return s.clone();
+    }
+    if let Some(env) = scope {
+        for (name, val) in env {
+            if !name.starts_with("__") && def_eq(val, value, 0) {
+                return name.clone();
+            }
+        }
+    }
+    match value {
+        Value::Null => "null".to_string(),
+        v => serde_json::to_string(v).unwrap_or_else(|_| "<value>".to_string()),
+    }
+}
+
+/// Parenthesize a displayed subterm when it is a composite or arrow literal
+/// (contains `>>>` or `~>`); names and atoms print bare.
+fn paren_if_term(s: &str) -> String {
+    if s.contains(">>>") || s.contains("~>") {
+        format!("({s})")
+    } else {
+        s.to_string()
+    }
+}
+
+/// Structural equality of arrow definitions, ignoring captured `env` (context,
+/// not identity) except for the `__left__`/`__right__` composite components,
+/// which are compared recursively.
+fn def_eq(a: &Value, b: &Value, depth: usize) -> bool {
+    if depth > 16 {
+        return true;
+    }
+    match (a, b) {
+        (Value::Object(ao), Value::Object(bo)) => {
+            for (k, av) in ao {
+                if k == "env" || k == "span" {
+                    continue;
+                }
+                if !bo.get(k).is_some_and(|bv| def_eq(av, bv, depth + 1)) {
+                    return false;
+                }
+            }
+            for k in bo.keys() {
+                if k != "env" && k != "span" && !ao.contains_key(k) {
+                    return false;
+                }
+            }
+            let al = a.pointer("/env/__left__");
+            let ar = a.pointer("/env/__right__");
+            let bl = b.pointer("/env/__left__");
+            let br = b.pointer("/env/__right__");
+            (al.is_none() && bl.is_none()
+                || def_eq(
+                    al.unwrap_or(&Value::Null),
+                    bl.unwrap_or(&Value::Null),
+                    depth + 1,
+                ))
+                && (ar.is_none() && br.is_none()
+                    || def_eq(
+                        ar.unwrap_or(&Value::Null),
+                        br.unwrap_or(&Value::Null),
+                        depth + 1,
+                    ))
+        }
+        (Value::Array(aa), Value::Array(ba)) => {
+            aa.len() == ba.len()
+                && aa
+                    .iter()
+                    .zip(ba.iter())
+                    .all(|(av, bv)| def_eq(av, bv, depth + 1))
+        }
+        _ => a == b,
     }
 }
 

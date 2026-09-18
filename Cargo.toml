@@ -17,6 +17,7 @@ handl-runtime.workspace = true
 handl-plugin-engine-lex-pattern.workspace = true
 handl-plugin-engine-parse.workspace = true
 handl-plugin-engine-parse-pratt.workspace = true
+handl-plugin-engine-transform.workspace = true
 handl-plugin-engine-transform-rewrite.workspace = true
 handl-plugin-ext-cli.workspace = true
 handl-plugin-applier-bootstrap.workspace = true
