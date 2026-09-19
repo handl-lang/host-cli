@@ -19,7 +19,7 @@
 //! hnl transform <pass> <file.hnl> [--pipeline a,b,c] [--plan] [--trace]
 //!           [--stats] [--emit tree|json]       — run a transform pass (ADR-0094)
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
-//! hnl sdkgen c <header> --output <dir> [--target <triple>] [--only <glob>] [--config <yaml>]
+//! hnl sdkgen c <header> --output <dir> [--target <triple>] [--include <glob>] [--exclude <glob>] [--config <yaml>]
 //!                                                — generate C port + adapter
 //! ```
 //!
