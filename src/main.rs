@@ -932,7 +932,7 @@ fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
             // `import "spec"` / `import 'spec'` is the executable form —
             // keep it. `import <name> ...` (e.g. `import insert from
-            // "collection/insert"`) is a module declaration — strip it.
+            // "collections/vec"`) is a module declaration — strip it.
             let inner = rest.trim_start();
             return !inner.starts_with('"') && !inner.starts_with('\'');
         }
