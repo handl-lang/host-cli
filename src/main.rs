@@ -21,6 +21,8 @@
 //! hnl gen-grammar [output_path]                — generate TextMate grammar
 //! hnl sdkgen c <header> --output <dir> [--target <triple>] [--include <glob>] [--exclude <glob>] [--config <yaml>]
 //!                                                — generate C port + adapter
+//! hnl sdkgen webidl [<spec> | --from-url <url>] --output <dir>
+//!                                                — generate WebIDL port + adapter
 //! ```
 //!
 //! # Exit codes
