@@ -2148,26 +2148,9 @@ fn compact_arrows(value: &Value, lang: &Language, source: Option<&str>) -> Value
     }
 }
 
-/// Resolve an arrow's `"env"` JSON field to a concrete object — either the
-/// legacy inline map or a `{"__envref__": id}` reference into the
-/// process-local env registry (entries converted back to JSON).
-fn env_json_map(v: &Value) -> Option<serde_json::Map<String, Value>> {
-    let o = v.as_object()?;
-    if let Some(id) = o.get("__envref__").and_then(|x| x.as_u64()) {
-        let map = handl_value::env_ref_lookup(id)?;
-        let mut out = serde_json::Map::new();
-        for (k, val) in map.iter() {
-            out.insert(k.to_string(), handl_value::tagged_to_value(val));
-        }
-        Some(out)
-    } else {
-        Some(o.clone())
-    }
-}
-
 /// Compact display for an arrow value.
 ///
-/// - A composite built by `>>>` captures its components in `env` as
+/// - A composite built by `>>>` records its components in `binds` as
 ///   `__left__`/`__right__` and prints as `left >>> right`. Components that
 ///   were unbound names evaluate to their name string (first-class name
 ///   references), so `fetch >>> serialize >>> parse` prints as written.
@@ -2200,8 +2183,10 @@ fn arrow_display(
     if !is_plain && !is_graded {
         return None;
     }
-    let env_storage = obj.get("env").and_then(env_json_map);
-    let env = env_storage.as_ref();
+    // `binds` holds the arrow's residual named values (ADR-0106) — the
+    // names a composite or recursive arrow still refers to.
+    let binds_storage = obj.get("binds").and_then(|b| b.as_object());
+    let env = binds_storage;
     // A name bound in scope for this same definition wins over expansion.
     for e in scope.into_iter().chain(env.iter().copied()) {
         for (name, val) in e {
@@ -2211,14 +2196,13 @@ fn arrow_display(
         }
     }
     if is_graded {
-        // Graded arrows carry no env of their own; the evaluated `inputs`
-        // side does, and it captured the ambient scope — use it so named
-        // arrows on either side print by name.
+        // Graded arrows carry no binds of their own; the evaluated `inputs`
+        // side does — use it so named arrows on either side print by name.
         let inputs_env_storage = obj
             .get("inputs")
-            .and_then(|i| i.get("env"))
-            .and_then(env_json_map);
-        let inner_scope = env.or(inputs_env_storage.as_ref());
+            .and_then(|i| i.get("binds"))
+            .and_then(|b| b.as_object());
+        let inner_scope = env.or(inputs_env_storage);
         // The `dim` slot is a normal expression — `~[a >>> b]~>`, `~[N]~>`,
         // `~[f(x)]~>` — so the grade may be any value, not just a literal.
         let grade = term_display(
@@ -2315,7 +2299,7 @@ fn paren_if_term(s: &str) -> String {
     }
 }
 
-/// Structural equality of arrow definitions, ignoring captured `env` (context,
+/// Structural equality of arrow definitions, ignoring `binds` (context,
 /// not identity) except for the `__left__`/`__right__` composite components,
 /// which are compared recursively.
 fn def_eq(a: &Value, b: &Value, depth: usize) -> bool {
@@ -2325,7 +2309,7 @@ fn def_eq(a: &Value, b: &Value, depth: usize) -> bool {
     match (a, b) {
         (Value::Object(ao), Value::Object(bo)) => {
             for (k, av) in ao {
-                if k == "env" || k == "span" {
+                if k == "binds" || k == "span" {
                     continue;
                 }
                 if !bo.get(k).is_some_and(|bv| def_eq(av, bv, depth + 1)) {
@@ -2333,12 +2317,12 @@ fn def_eq(a: &Value, b: &Value, depth: usize) -> bool {
                 }
             }
             for k in bo.keys() {
-                if k != "env" && k != "span" && !ao.contains_key(k) {
+                if k != "binds" && k != "span" && !ao.contains_key(k) {
                     return false;
                 }
             }
-            let aenv = ao.get("env").and_then(env_json_map);
-            let benv = bo.get("env").and_then(env_json_map);
+            let aenv = ao.get("binds").and_then(|b| b.as_object());
+            let benv = bo.get("binds").and_then(|b| b.as_object());
             let al = aenv.as_ref().and_then(|e| e.get("__left__"));
             let ar = aenv.as_ref().and_then(|e| e.get("__right__"));
             let bl = benv.as_ref().and_then(|e| e.get("__left__"));
