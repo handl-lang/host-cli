@@ -2148,6 +2148,23 @@ fn compact_arrows(value: &Value, lang: &Language, source: Option<&str>) -> Value
     }
 }
 
+/// Resolve an arrow's `"env"` JSON field to a concrete object — either the
+/// legacy inline map or a `{"__envref__": id}` reference into the
+/// process-local env registry (entries converted back to JSON).
+fn env_json_map(v: &Value) -> Option<serde_json::Map<String, Value>> {
+    let o = v.as_object()?;
+    if let Some(id) = o.get("__envref__").and_then(|x| x.as_u64()) {
+        let map = handl_value::env_ref_lookup(id)?;
+        let mut out = serde_json::Map::new();
+        for (k, val) in map.iter() {
+            out.insert(k.to_string(), handl_value::tagged_to_value(val));
+        }
+        Some(out)
+    } else {
+        Some(o.clone())
+    }
+}
+
 /// Compact display for an arrow value.
 ///
 /// - A composite built by `>>>` captures its components in `env` as
@@ -2183,7 +2200,8 @@ fn arrow_display(
     if !is_plain && !is_graded {
         return None;
     }
-    let env = obj.get("env").and_then(|e| e.as_object());
+    let env_storage = obj.get("env").and_then(env_json_map);
+    let env = env_storage.as_ref();
     // A name bound in scope for this same definition wins over expansion.
     for e in scope.into_iter().chain(env.iter().copied()) {
         for (name, val) in e {
@@ -2196,11 +2214,11 @@ fn arrow_display(
         // Graded arrows carry no env of their own; the evaluated `inputs`
         // side does, and it captured the ambient scope — use it so named
         // arrows on either side print by name.
-        let inner_scope = env.or_else(|| {
-            obj.get("inputs")
-                .and_then(|i| i.get("env"))
-                .and_then(|e| e.as_object())
-        });
+        let inputs_env_storage = obj
+            .get("inputs")
+            .and_then(|i| i.get("env"))
+            .and_then(env_json_map);
+        let inner_scope = env.or(inputs_env_storage.as_ref());
         // The `dim` slot is a normal expression — `~[a >>> b]~>`, `~[N]~>`,
         // `~[f(x)]~>` — so the grade may be any value, not just a literal.
         let grade = term_display(
@@ -2319,10 +2337,12 @@ fn def_eq(a: &Value, b: &Value, depth: usize) -> bool {
                     return false;
                 }
             }
-            let al = a.pointer("/env/__left__");
-            let ar = a.pointer("/env/__right__");
-            let bl = b.pointer("/env/__left__");
-            let br = b.pointer("/env/__right__");
+            let aenv = ao.get("env").and_then(env_json_map);
+            let benv = bo.get("env").and_then(env_json_map);
+            let al = aenv.as_ref().and_then(|e| e.get("__left__"));
+            let ar = aenv.as_ref().and_then(|e| e.get("__right__"));
+            let bl = benv.as_ref().and_then(|e| e.get("__left__"));
+            let br = benv.as_ref().and_then(|e| e.get("__right__"));
             (al.is_none() && bl.is_none()
                 || def_eq(
                     al.unwrap_or(&Value::Null),
