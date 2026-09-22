@@ -967,12 +967,83 @@ fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
 /// a `<dir>/<name>.hnl` main file; a bare name without `.hnl` is tried
 /// with `.hnl` appended.
 fn spec_resolves_to_file(spec: &str, bases: &[&Path]) -> bool {
+    resolve_spec_path(spec, bases).is_some()
+}
+
+/// Resolve `<spec>` to the file `ModuleLoader` would load, under `bases`
+/// (same order as [`spec_resolves_to_file`]).
+fn resolve_spec_path(spec: &str, bases: &[&Path]) -> Option<PathBuf> {
     if Path::new(spec).is_absolute() {
-        return file_candidate(Path::new(spec), spec).is_some();
+        return file_candidate(Path::new(spec), spec);
     }
     bases
         .iter()
-        .any(|base| file_candidate(&base.join(spec), spec).is_some())
+        .find_map(|base| file_candidate(&base.join(spec), spec))
+}
+
+/// The specifier of a *splice-form* import — `import "<spec>"` or
+/// `from "<spec>" import *` with no alias — whose exports land directly in
+/// the importer's scope at eval time. Named/aliased `from` forms bind
+/// statically known names and need no spliced scope.
+fn splice_import_spec(trimmed: &str) -> Option<String> {
+    if let Some(rest) = trimmed.strip_prefix("import") {
+        if !rest.starts_with(' ') && !rest.starts_with('\t') {
+            return None;
+        }
+        let inner = rest.trim_start();
+        if !inner.starts_with('"') && !inner.starts_with('\'') {
+            return None;
+        }
+        return first_quoted_spec(inner).map(str::to_string);
+    }
+    let rest = trimmed.strip_prefix("from")?;
+    if !rest.starts_with(' ') && !rest.starts_with('\t') {
+        return None;
+    }
+    // `from "<spec>" <tail>` — splice iff the tail is `import *` exactly.
+    let bytes = rest.as_bytes();
+    let q = bytes.iter().position(|b| *b == b'"' || *b == b'\'')?;
+    let quote = bytes[q] as char;
+    let after_q = &rest[q + 1..];
+    let end = after_q.find(quote)?;
+    let spec = &after_q[..end];
+    let tail = after_q[end + quote.len_utf8()..].trim_start();
+    let tail = tail.strip_prefix("import")?.trim_start();
+    let tail = tail
+        .split("--")
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .trim_end_matches(';')
+        .trim_end();
+    (tail == "*").then(|| spec.to_string())
+}
+
+/// Names a file's splice-form imports bind into scope at eval time: for
+/// each resolvable `import "<spec>"` / `from "<spec>" import *`, the
+/// module's declared exports (collected without evaluating it). The
+/// bootstrap typechecker's module scope is source-only, so `hnl run` seeds
+/// these into its prelude — otherwise every use of a spliced export fails
+/// the pre-run gate as `unbound wire` and the module never loads.
+fn spliced_import_names(src: &str, bases: &[&Path]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("--") {
+            continue;
+        }
+        let Some(spec) = splice_import_spec(trimmed) else {
+            continue;
+        };
+        let Some(path) = resolve_spec_path(&spec, bases) else {
+            continue;
+        };
+        let Ok(mod_src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        names.extend(handl_runtime::module_prep::module_export_names(&mod_src));
+    }
+    names
 }
 
 fn file_candidate(joined: &Path, spec: &str) -> Option<PathBuf> {
@@ -1054,16 +1125,6 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
         },
     };
 
-    // Typecheck before running. Canonical-dialect sources go through the
-    // embedded Handl model; non-canonical dialects (Contract/Arrow) are
-    // checked by their own loaders, same routing as `hnl typecheck`.
-    if detect_dialect(&source) == Dialect::Canonical {
-        if let Err(err) = kit.typecheck_handl(&source) {
-            eprintln!("run: typecheck failed: {err}");
-            return 1;
-        }
-    }
-
     // Resolution bases for `from "<spec>"` declaration lines, mirroring
     // `ModuleLoader` order: the entry file's directory, the module root,
     // then the process working directory. A `from` line whose specifier
@@ -1083,6 +1144,20 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     if !bases.iter().any(|b| *b == cwd.as_path()) {
         bases.push(&cwd);
+    }
+
+    // Typecheck before running. Canonical-dialect sources go through the
+    // embedded Handl model; non-canonical dialects (Contract/Arrow) are
+    // checked by their own loaders, same routing as `hnl typecheck`.
+    // Splice-form file imports (`import "<spec>"`, `from "<spec>" import *`)
+    // bind the module's exports into scope at eval time — seed those names
+    // so the scope check sees them.
+    if detect_dialect(&source) == Dialect::Canonical {
+        let spliced = spliced_import_names(&source, &bases);
+        if let Err(err) = kit.typecheck_handl_with_prelude(&source, &spliced) {
+            eprintln!("run: typecheck failed: {err}");
+            return 1;
+        }
     }
 
     let source = strip_import_declarations(&source, &bases);

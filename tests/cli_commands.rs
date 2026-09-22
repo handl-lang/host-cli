@@ -296,6 +296,30 @@ fn run_file() {
     assert!(stdout.contains("2"), "expected result 2, got: {stdout}");
 }
 
+/// `import "<path>"` splices the module's exports into scope at eval time;
+/// the pre-run typecheck must see those names or it aborts on
+/// `unbound wire` and the module never loads.
+#[test]
+fn run_file_with_splice_import() {
+    let tmp = env::temp_dir().join(format!("hnl-cli-test-{}-import", std::process::id()));
+    fs::create_dir_all(&tmp).expect("mkdir");
+    fs::write(tmp.join("imp_mod.hnl"), "export v := 41\n").expect("write mod");
+    for (name, import_line) in [
+        ("imp_main.hnl", "import \"./imp_mod.hnl\""),
+        ("imp_main_star.hnl", "from \"./imp_mod.hnl\" import *"),
+    ] {
+        let main = tmp.join(name);
+        fs::write(&main, format!("{import_line}\nv + 1\n")).expect("write main");
+        let (code, stdout, stderr) = run_hnl(&["run", main.to_str().unwrap()]);
+        assert_eq!(
+            code, 0,
+            "expected exit 0 for {import_line}, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        assert!(stdout.contains("42"), "expected result 42, got: {stdout}");
+    }
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn eval_expr() {
     let (code, stdout, stderr) = run_hnl(&["eval", "1 + 2"]);
