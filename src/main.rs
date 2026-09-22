@@ -511,7 +511,14 @@ fn lint_one(
     }
 
     // `unbound-wire` is delegated to the bootstrap typechecker's scope pass;
-    // seed it with the wire prelude supplied by the host (canonical or user).
+    // seed it with the wire prelude supplied by the host (canonical or user)
+    // plus the names this file's splice-form imports (`import "<spec>"`,
+    // `from "<spec>" import *`) bind into scope at eval time — same seeding
+    // as `hnl run`/`hnl typecheck`.
+    let bases = spec_resolution_bases(Path::new(path), None);
+    let mut seeded = prelude.clone();
+    seeded.extend(spliced_import_names(src, &bases));
+    let prelude = &seeded;
     let lint_result = match lang {
         Some(lang) => {
             handl_plugin_ext_lint::lint_source_with_prelude_and_language(lang, src, prelude)
@@ -654,7 +661,13 @@ fn typecheck_one(kit: &Kit, src: &str, path: &str, had_failure: &mut bool) -> i3
     // and typechecks via the embedded `.hnl` model. On success it returns
     // the synthesized type; on failure the `LangError` is rendered and
     // recorded as a failure.
-    match kit.typecheck_handl(src) {
+    //
+    // Splice-form file imports (`import "<spec>"`, `from "<spec>" import *`)
+    // bind the module's exports into scope at eval time — seed those names
+    // so the source-only scope check sees them (same seeding as `hnl run`).
+    let bases = spec_resolution_bases(Path::new(path), kit.module_root());
+    let spliced = spliced_import_names(src, &bases);
+    match kit.typecheck_handl_with_prelude(src, &spliced) {
         Ok(typ) => {
             println!("{path}: ok: {typ}");
             0
@@ -920,14 +933,14 @@ fn test_command(args: &[String]) -> i32 {
 /// - `from "<bare-name>" import ...` — `<spec>` names a host module
 ///   (`str`, `fn`, `dedent`, ...) or a specifier with no backing file —
 ///   the module chain supplies the bindings either way.
-fn strip_import_declarations(src: &str, bases: &[&Path]) -> String {
+fn strip_import_declarations(src: &str, bases: &[PathBuf]) -> String {
     src.lines()
         .filter(|line| !is_import_line(line.trim_start(), bases))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
+fn is_import_line(trimmed: &str, bases: &[PathBuf]) -> bool {
     if let Some(rest) = trimmed.strip_prefix("import") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
             // `import "spec"` / `import 'spec'` is the executable form —
@@ -966,13 +979,36 @@ fn is_import_line(trimmed: &str, bases: &[&Path]) -> bool {
 /// A directory is treated as a package if it contains an `index.hnl` or
 /// a `<dir>/<name>.hnl` main file; a bare name without `.hnl` is tried
 /// with `.hnl` appended.
-fn spec_resolves_to_file(spec: &str, bases: &[&Path]) -> bool {
+fn spec_resolves_to_file(spec: &str, bases: &[PathBuf]) -> bool {
     resolve_spec_path(spec, bases).is_some()
+}
+
+/// Resolution bases for `import "<spec>"` specifiers in a file at `path`,
+/// mirroring `ModuleLoader` order: the file's directory, the module root,
+/// then the process working directory. Used by `run`, `typecheck`, and
+/// `lint` alike so each command resolves imports the way eval will.
+fn spec_resolution_bases(path: &Path, module_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut bases: Vec<PathBuf> = Vec::new();
+    match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => bases.push(dir.to_path_buf()),
+        _ => bases.push(PathBuf::from(".")),
+    }
+    if let Some(root) = module_root {
+        if !bases.iter().any(|b| b.as_path() == root) {
+            bases.push(root.to_path_buf());
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if !bases.iter().any(|b| *b == cwd) {
+            bases.push(cwd);
+        }
+    }
+    bases
 }
 
 /// Resolve `<spec>` to the file `ModuleLoader` would load, under `bases`
 /// (same order as [`spec_resolves_to_file`]).
-fn resolve_spec_path(spec: &str, bases: &[&Path]) -> Option<PathBuf> {
+fn resolve_spec_path(spec: &str, bases: &[PathBuf]) -> Option<PathBuf> {
     if Path::new(spec).is_absolute() {
         return file_candidate(Path::new(spec), spec);
     }
@@ -1022,10 +1058,11 @@ fn splice_import_spec(trimmed: &str) -> Option<String> {
 /// Names a file's splice-form imports bind into scope at eval time: for
 /// each resolvable `import "<spec>"` / `from "<spec>" import *`, the
 /// module's declared exports (collected without evaluating it). The
-/// bootstrap typechecker's module scope is source-only, so `hnl run` seeds
-/// these into its prelude — otherwise every use of a spliced export fails
-/// the pre-run gate as `unbound wire` and the module never loads.
-fn spliced_import_names(src: &str, bases: &[&Path]) -> HashSet<String> {
+/// bootstrap typechecker's module scope is source-only, so `hnl run`,
+/// `hnl typecheck`, and `hnl lint` seed these into their scope-check
+/// prelude — otherwise every use of a spliced export is reported as
+/// `unbound wire` even though eval binds it.
+fn spliced_import_names(src: &str, bases: &[PathBuf]) -> HashSet<String> {
     let mut names = HashSet::new();
     for line in src.lines() {
         let trimmed = line.trim_start();
@@ -1130,21 +1167,7 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
     // then the process working directory. A `from` line whose specifier
     // resolves to a file under one of these is kept (it is the executable
     // import op); one that names a host module is stripped.
-    let mut bases: Vec<&Path> = Vec::new();
-    let dot = Path::new(".");
-    match start.parent() {
-        Some(dir) if !dir.as_os_str().is_empty() => bases.push(dir),
-        _ => bases.push(dot),
-    }
-    if let Some(root) = kit.module_root() {
-        if !bases.contains(&root) {
-            bases.push(root);
-        }
-    }
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if !bases.iter().any(|b| *b == cwd.as_path()) {
-        bases.push(&cwd);
-    }
+    let bases = spec_resolution_bases(start, kit.module_root());
 
     // Typecheck before running. Canonical-dialect sources go through the
     // embedded Handl model; non-canonical dialects (Contract/Arrow) are

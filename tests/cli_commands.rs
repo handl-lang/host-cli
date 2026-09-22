@@ -320,6 +320,50 @@ fn run_file_with_splice_import() {
     let _ = fs::remove_dir_all(&tmp);
 }
 
+/// `typecheck`/`lint` share `run`'s scope-check blindness: a file using
+/// `import "<path>"` / `from "<path>" import *` and referencing a spliced
+/// export must not report `unbound wire` — the commands seed the module's
+/// export names into the check prelude exactly like `run`'s pre-run gate.
+#[test]
+fn typecheck_and_lint_with_splice_import() {
+    let tmp = env::temp_dir().join(format!("hnl-cli-test-{}-splice", std::process::id()));
+    fs::create_dir_all(&tmp).expect("mkdir");
+    fs::write(tmp.join("imp_mod.hnl"), "export v := 41\n").expect("write mod");
+    for (name, import_line) in [
+        ("imp_main.hnl", "import \"./imp_mod.hnl\""),
+        ("imp_main_star.hnl", "from \"./imp_mod.hnl\" import *"),
+    ] {
+        let main = tmp.join(name);
+        fs::write(&main, format!("{import_line}\nx := v + 1\n")).expect("write main");
+        for cmd in ["typecheck", "lint"] {
+            let (code, stdout, stderr) = run_hnl(&[cmd, main.to_str().unwrap()]);
+            assert_eq!(
+                code, 0,
+                "expected exit 0 for `{cmd}` on `{import_line}`, got {code}\nstdout: {stdout}\nstderr: {stderr}"
+            );
+            assert!(
+                !stdout.contains("unbound"),
+                "expected no unbound diagnostic for `{cmd}` on `{import_line}`, got: {stdout}"
+            );
+        }
+    }
+    // A genuinely unbound name still errors under both commands.
+    let bad = tmp.join("imp_bad.hnl");
+    fs::write(&bad, "import \"./imp_mod.hnl\"\nx := missing_name\n").expect("write bad");
+    for cmd in ["typecheck", "lint"] {
+        let (code, stdout, _) = run_hnl(&[cmd, bad.to_str().unwrap()]);
+        assert_eq!(
+            code, 1,
+            "expected exit 1 for `{cmd}` on unbound name, got {code}"
+        );
+        assert!(
+            stdout.contains("unbound"),
+            "expected unbound diagnostic for `{cmd}`, got: {stdout}"
+        );
+    }
+    let _ = fs::remove_dir_all(&tmp);
+}
+
 #[test]
 fn eval_expr() {
     let (code, stdout, stderr) = run_hnl(&["eval", "1 + 2"]);
