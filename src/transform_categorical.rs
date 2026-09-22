@@ -994,84 +994,16 @@ fn parse_raw(lang: &Language, src: &str) -> Result<Vec<(Ast, StatementInfo)>, La
     Ok(asts)
 }
 
+/// Delegates to the shared `plugin-ext-diag` splitter (mirrors
+/// `transform_parse_raw` in main.rs).
 fn split_statements(src: &str) -> Vec<StatementInfo> {
-    let bytes = src.as_bytes();
-    let mut chunks = Vec::new();
-    let mut start = 0usize;
-    let mut depth: i32 = 0;
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'"' {
-            i += 1;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'\\' => {
-                        i += 2;
-                        continue;
-                    }
-                    b'"' => {
-                        i += 1;
-                        break;
-                    }
-                    _ => i += 1,
-                }
-            }
-            continue;
-        }
-
-        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-
-        match b {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth -= 1,
-            _ => {}
-        }
-
-        if depth == 0 && (b == b'\n' || b == b';') {
-            let (trim_start, trim_end) = trim_offsets(src, start, i);
-            if trim_start < trim_end {
-                chunks.push(StatementInfo {
-                    source: src[trim_start..trim_end].to_string(),
-                    start: trim_start,
-                });
-            }
-            i += 1;
-            start = i;
-            continue;
-        }
-
-        i += 1;
-    }
-
-    let (trim_start, trim_end) = trim_offsets(src, start, src.len());
-    if trim_start < trim_end {
-        chunks.push(StatementInfo {
-            source: src[trim_start..trim_end].to_string(),
-            start: trim_start,
-        });
-    }
-    chunks
-}
-
-fn trim_offsets(src: &str, a: usize, b: usize) -> (usize, usize) {
-    let bytes = src.as_bytes();
-    let mut start = a;
-    while start < b && bytes[start].is_ascii_whitespace() {
-        start += 1;
-    }
-    let mut end = b;
-    while end > start && bytes[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    (start, end)
+    handl_plugin_ext_diag::split_statements(src)
+        .into_iter()
+        .map(|c| StatementInfo {
+            source: c.text,
+            start: c.offset,
+        })
+        .collect()
 }
 
 fn offset_spans(ast: &mut Ast, delta: usize) -> Result<(), LangError> {

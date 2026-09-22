@@ -1623,93 +1623,19 @@ fn offset_spans(ast: &mut handl_language::Ast, delta: usize) -> Result<(), LangE
     Ok(())
 }
 
-/// Split `src` into top-level statement chunks at bracket-depth zero,
-/// respecting string literals and `--` comments (mirrors the bootstrap
-/// typechecker / linter / test runner convention — the Pratt parser parses
-/// one statement per call).
+/// Split `src` into top-level statement chunks — delegates to the shared
+/// `plugin-ext-diag` implementation used by the bootstrap typechecker,
+/// linter, and test runner (the Pratt parser parses one statement per
+/// call).
 fn split_statements(src: &str) -> Vec<StatementInfo> {
-    let bytes = src.as_bytes();
-    let mut chunks = Vec::new();
-    let mut start = 0usize;
-    let mut depth: i32 = 0;
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        // String literal — skip to the closing quote (respecting escapes).
-        if b == b'"' {
-            i += 1;
-            while i < bytes.len() {
-                match bytes[i] {
-                    b'\\' => {
-                        i += 2;
-                        continue;
-                    }
-                    b'"' => {
-                        i += 1;
-                        break;
-                    }
-                    _ => i += 1,
-                }
-            }
-            continue;
-        }
-
-        // Comment: `--` to end of line.
-        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
-            while i < bytes.len() && bytes[i] != b'\n' {
-                i += 1;
-            }
-            continue;
-        }
-
-        match b {
-            b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth -= 1,
-            _ => {}
-        }
-
-        if depth == 0 && (b == b'\n' || b == b';') {
-            let (trim_start, trim_end) = trim_offsets(src, start, i);
-            if trim_start < trim_end {
-                chunks.push(StatementInfo {
-                    source: src[trim_start..trim_end].to_string(),
-                    start: trim_start,
-                    end: trim_end,
-                });
-            }
-            i += 1;
-            start = i;
-            continue;
-        }
-
-        i += 1;
-    }
-
-    let (trim_start, trim_end) = trim_offsets(src, start, src.len());
-    if trim_start < trim_end {
-        chunks.push(StatementInfo {
-            source: src[trim_start..trim_end].to_string(),
-            start: trim_start,
-            end: trim_end,
-        });
-    }
-    chunks
-}
-
-/// Return the byte offsets of the non-whitespace content within `src[a..b]`.
-fn trim_offsets(src: &str, a: usize, b: usize) -> (usize, usize) {
-    let bytes = src.as_bytes();
-    let mut start = a;
-    while start < b && bytes[start].is_ascii_whitespace() {
-        start += 1;
-    }
-    let mut end = b;
-    while end > start && bytes[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    (start, end)
+    handl_plugin_ext_diag::split_statements(src)
+        .into_iter()
+        .map(|c| StatementInfo {
+            start: c.offset,
+            end: c.offset + c.text.len(),
+            source: c.text,
+        })
+        .collect()
 }
 
 /// Check whether `ast` can be emitted back to surface syntax without loss.
