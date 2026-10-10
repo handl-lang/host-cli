@@ -42,11 +42,11 @@ use std::sync::Arc;
 use handl_kit_canonical::Kit;
 use handl_language::{AstRef, LangError, Language, Source};
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
-use handl_plugin_ext_diag::Diagnostic;
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_engine_lex_pattern::DataLexerEngine;
 use handl_plugin_engine_parse_pratt::PrattEngine;
 use handl_plugin_ext_cli::BasicCli;
+use handl_plugin_ext_diag::Diagnostic;
 use handl_plugin_ext_diag::{Severity, render_diagnostic, render_diagnostics};
 use handl_plugin_ext_refinement::{Dialect, detect_dialect};
 use handl_runtime::{EngineRegistry, Runtime, RuntimeConfig};
@@ -347,6 +347,8 @@ fn tooling_host() -> Result<DefaultHost, PlatformError> {
     let mut host = DefaultHost::new();
     host.register_plugin(handl_plugin_ext_fmt::FmtPlugin::new());
     host.register_plugin(handl_plugin_ext_lint::LintPlugin::new());
+    host.register_plugin(handl_plugin_ext_typecheck::TypecheckPlugin::new());
+    host.register_plugin(handl_plugin_ext_test::TestPlugin::new());
     host.load()?;
     host.resolve_composition()
         .map_err(|e| PlatformError::Plugin(format!("tooling composition: {e}")))?;
@@ -500,6 +502,26 @@ fn lint_command(args: &[String]) -> i32 {
         None
     };
 
+    // ADR-0124: serialize the language **once per command**, not per file.
+    let lang_json: Option<serde_json::Value> = match &lang {
+        Some(l) => match serde_json::to_value(l) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("lint: could not serialize the language for the capability: {e}");
+                return 2;
+            }
+        },
+        None => None,
+    };
+
+    let mut host = match tooling_host() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("lint: tooling host unavailable: {e}");
+            return 2;
+        }
+    };
+
     let mut had_failure = false;
 
     if paths.is_empty() {
@@ -509,13 +531,14 @@ fn lint_command(args: &[String]) -> i32 {
             return 2;
         }
         let code = lint_one(
+            &mut host,
             &src,
             "<stdin>",
             fix,
             fail_on_warn,
             &mut had_failure,
             &prelude,
-            lang.as_ref(),
+            lang_json.as_ref(),
         );
         if code == 2 {
             return 2;
@@ -532,13 +555,14 @@ fn lint_command(args: &[String]) -> i32 {
             }
         };
         let code = lint_one(
+            &mut host,
             &src,
             path,
             fix,
             fail_on_warn,
             &mut had_failure,
             &prelude,
-            lang.as_ref(),
+            lang_json.as_ref(),
         );
         if code == 2 {
             return 2;
@@ -551,13 +575,14 @@ fn lint_command(args: &[String]) -> i32 {
 /// Lint a single source. Returns 2 on parse error; sets `had_failure` for
 /// Error diagnostics (or Warning when `fail_on_warn`).
 fn lint_one(
+    host: &mut DefaultHost,
     src: &str,
     path: &str,
     fix: bool,
     fail_on_warn: bool,
     had_failure: &mut bool,
     prelude: &HashSet<String>,
-    lang: Option<&Language>,
+    lang_json: Option<&serde_json::Value>,
 ) -> i32 {
     if detect_dialect(src) != Dialect::Canonical {
         eprintln!("skipping dialect file: {path}");
@@ -572,17 +597,50 @@ fn lint_one(
     let bases = spec_resolution_bases(Path::new(path), None);
     let mut seeded = prelude.clone();
     seeded.extend(spliced_import_names(src, &bases));
-    let prelude = &seeded;
-    let lint_result = match lang {
-        Some(lang) => {
-            handl_plugin_ext_lint::lint_source_with_prelude_and_language(lang, src, prelude)
-        }
-        None => handl_plugin_ext_lint::lint_source_with_prelude(src, prelude),
+    let prelude: Vec<String> = seeded.into_iter().collect();
+
+    // Same capability path a third-party consumer uses (ADR-0085 step 4). The
+    // caller's `language` rides in the payload (ADR-0124) so a capability lint
+    // matches a direct call — this crate's built-in default is `lint_language()`
+    // while the CLI's is `load_canonical_language()`, and two "canonical"
+    // languages can carry different rules.
+    let mut payload = json!({ "source": src, "prelude": prelude });
+    if let Some(l) = lang_json {
+        payload["language"] = l.clone();
+    }
+
+    let request = CapabilityRequest {
+        capability: "lint".into(),
+        payload,
     };
-    let diags = match lint_result {
-        Ok(d) => d,
-        Err(err) => {
-            eprintln!("{path}: parse error: {err}");
+    let response = match host.run(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("lint: {path}: {e}");
+            return 2;
+        }
+    };
+    let diags: Vec<Diagnostic> = match response.0.get("status").and_then(|v| v.as_str()) {
+        Some("diagnostics") => response
+            .0
+            .get("diagnostics")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
+        Some("error") => {
+            let msg = response
+                .0
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("lint failed");
+            // No extra "parse error:" prefix: `LintError`'s own `Display`
+            // already begins with it, so the CLI's prefix used to double it
+            // ("parse error: parse error: lex error …").
+            eprintln!("{path}: {msg}");
+            return 2;
+        }
+        other => {
+            eprintln!("lint: {path}: unexpected capability status {other:?}");
             return 2;
         }
     };
@@ -599,15 +657,33 @@ fn lint_one(
     }
 
     if fix {
-        match handl_plugin_ext_lint::fix_source_with_prelude(src, prelude) {
-            Ok(fixed) => {
-                if let Err(e) = write_atomic(path, &fixed) {
+        // `fix` does not honour a caller-supplied language (no
+        // `fix_source_with_language` variant exists) — see LintPlugin.
+        let fix_request = CapabilityRequest {
+            capability: "lint".into(),
+            payload: json!({ "source": src, "fix": true, "prelude": prelude }),
+        };
+        match host.run(&fix_request) {
+            Ok(r) if r.0.get("status").and_then(|v| v.as_str()) == Some("fixed") => {
+                let fixed =
+                    r.0.get("output")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                if let Err(e) = write_atomic(path, fixed) {
                     eprintln!("lint: failed to write {path}: {e}");
                     return 2;
                 }
             }
-            Err(err) => {
-                eprintln!("{path}: fix error: {err}");
+            Ok(r) => {
+                let msg =
+                    r.0.get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("fix failed");
+                eprintln!("{path}: fix error: {msg}");
+                return 2;
+            }
+            Err(e) => {
+                eprintln!("lint: {path}: {e}");
                 return 2;
             }
         }
@@ -643,6 +719,14 @@ fn typecheck_command(args: &[String]) -> i32 {
         }
     };
 
+    let mut host = match tooling_host() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("typecheck: tooling host unavailable: {e}");
+            return 2;
+        }
+    };
+
     let mut had_failure = false;
 
     if paths.is_empty() {
@@ -651,7 +735,7 @@ fn typecheck_command(args: &[String]) -> i32 {
             eprintln!("typecheck: failed to read stdin");
             return 2;
         }
-        let code = typecheck_one(&kit, &src, "<stdin>", &mut had_failure);
+        let code = typecheck_one(&mut host, &kit, &src, "<stdin>", &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -666,7 +750,7 @@ fn typecheck_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = typecheck_one(&kit, &src, path, &mut had_failure);
+        let code = typecheck_one(&mut host, &kit, &src, path, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -690,7 +774,13 @@ fn typecheck_wire_prelude() -> &'static std::collections::HashSet<String> {
 /// (the Handl-authored `.hnl` model adapter, ADR-0105). The dialect routing
 /// (Contract/Arrow) is unchanged — only canonical sources reach the Handl
 /// engine.
-fn typecheck_one(kit: &Kit, src: &str, path: &str, had_failure: &mut bool) -> i32 {
+fn typecheck_one(
+    host: &mut DefaultHost,
+    kit: &Kit,
+    src: &str,
+    path: &str,
+    had_failure: &mut bool,
+) -> i32 {
     // Route non-canonical dialects to their own loaders (ADR-0077).
     match detect_dialect(src) {
         Dialect::Contract => {
@@ -720,28 +810,56 @@ fn typecheck_one(kit: &Kit, src: &str, path: &str, had_failure: &mut bool) -> i3
     // bind the module's exports into scope at eval time — seed those names
     // so the source-only scope check sees them (same seeding as `hnl run`).
     let bases = spec_resolution_bases(Path::new(path), kit.module_root());
-    let spliced = spliced_import_names(src, &bases);
-    match kit.typecheck_handl_with_prelude(src, &spliced) {
-        Ok(typ) => {
+    let spliced: Vec<String> = spliced_import_names(src, &bases).into_iter().collect();
+    // Same capability path a third-party consumer uses (ADR-0085 step 4).
+    // The plugin assembles its language from the same single canonical path
+    // this command does (`Kit::new`), so — unlike `lint` — no `language`
+    // payload is needed to keep the two in step (see `plugin-ext-typecheck`).
+    let request = CapabilityRequest {
+        capability: "typecheck".into(),
+        payload: json!({ "source": src, "prelude": spliced }),
+    };
+    let response = match host.run(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            return 2;
+        }
+    };
+    match response.0.get("status").and_then(|v| v.as_str()) {
+        Some("ok") => {
+            let typ = response
+                .0
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>");
             println!("{path}: ok: {typ}");
             0
         }
-        Err(err) => {
-            // Lex failures and other parse-stage engine errors are exit 2.
-            // `typecheck_handl` reports typecheck failures with the prefix
-            // "typecheck errors: ..."; those are exit 1 and are printed to
-            // stdout so the diagnostic is visible to the `hnl typecheck`
-            // tests.
-            if matches!(err, LangError::LexError { .. }) {
-                eprintln!("{path}: {err}");
-                return 2;
-            }
-            if err.to_string().contains("typecheck errors:") {
-                println!("{path}: {err}");
-                *had_failure = true;
-                return 0;
-            }
-            eprintln!("{path}: {err}");
+        // Reported type errors: stdout + exit 0, with the failure recorded —
+        // matching the pre-reroute behaviour of the `typecheck errors:` arm.
+        Some("type-errors") => {
+            let msg = response
+                .0
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("typecheck failed");
+            println!("{path}: {msg}");
+            *had_failure = true;
+            0
+        }
+        // Lex / parse / language errors: stderr + exit 2.
+        Some("error") => {
+            let msg = response
+                .0
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("typecheck failed");
+            eprintln!("{path}: {msg}");
+            2
+        }
+        other => {
+            eprintln!("{path}: unexpected typecheck status {other:?}");
             2
         }
     }
@@ -829,136 +947,116 @@ fn test_command(args: &[String]) -> i32 {
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
 
-    // Discover with the filesystem provider by default, or the git-changed
-    // provider when `--changed` is requested.
-    let plan = if changed {
-        let provider = handl_plugin_engine_test::ChangedProvider;
-        match handl_plugin_engine_test::discover_with(&provider, &path_bufs, None) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("test: discovery error: {e}");
-                return 2;
-            }
-        }
-    } else {
-        match handl_plugin_engine_test::discover(&path_bufs) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("test: discovery error: {e}");
-                return 2;
-            }
+    let mut host = match tooling_host() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("test: tooling host unavailable: {e}");
+            return 2;
         }
     };
 
-    // Report parse errors discovered while scanning test modules.
-    let mut had_parse_error = false;
-    for (file, msg) in &plan.parse_errors {
-        eprintln!("{}: parse error: {msg}", file.display());
-        had_parse_error = true;
+    // Same capability path a third-party consumer uses (ADR-0085 step 4). The
+    // CLI keeps the *policy* — default paths, flag validation, output stream
+    // and exit code — and the runner capability does discovery + execution.
+    let mut payload = json!({
+        "paths": path_bufs
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>(),
+        "list": list,
+        "changed": changed,
+        "report": report_kind,
+    });
+    if let Some(f) = &filter {
+        payload["filter"] = json!(f);
     }
-
-    // Compose the selection predicate: name filter AND every `--tag`
-    // expression. Each `--tag` value is a tag expression — `a,b` selects
-    // tests tagged `a` OR `b`, `!a` selects tests NOT tagged `a` — and
-    // repeated `--tag` flags AND together.
-    let mut predicate = handl_plugin_engine_test::filter_predicate(filter.as_deref().unwrap_or(""));
-    for expr in &tags {
-        predicate = predicate.and(handl_plugin_engine_test::tag_expr_predicate(expr));
+    if !tags.is_empty() {
+        payload["tags"] = json!(tags);
     }
-
-    if list {
-        for case in &plan.tests {
-            if predicate.eval(case) {
-                println!("{} ({})", case.name, case.module.display());
-            }
-        }
-        return if had_parse_error { 1 } else { 0 };
+    if cache {
+        payload["cache"] = json!(true);
     }
-
-    // Build the run config from the CLI flags.
-    let mut config = handl_plugin_engine_test::RunConfig::new();
-    config.predicate = predicate;
-    if let Some(j) = jobs {
-        let policy = if j == "auto" {
-            handl_plugin_lib_scheduler::SchedulePolicy::default()
+    if let Some(j) = &jobs {
+        payload["jobs"] = if j == "auto" {
+            json!("auto")
         } else {
             match j.parse::<usize>() {
-                Ok(n) => handl_plugin_lib_scheduler::SchedulePolicy::parallel(n),
-                Err(_) => {
+                Ok(n) if n > 0 => json!(n),
+                _ => {
                     eprintln!("test: --jobs requires a positive integer or `auto`");
                     return 2;
                 }
             }
         };
-        config = config.with_policy(policy);
     }
 
-    // Disk-persisted result cache (ADR-0089). The cache lives at
-    // `.handl/cache/test-runner/cache.json` under the working directory.
-    let cache_path = PathBuf::from(".handl/cache/test-runner/cache.json");
-    if cache {
-        let cache = if cache_path.exists() {
-            match handl_plugin_engine_test::TestRunCache::load(&cache_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!(
-                        "test: warning: failed to load cache at {}: {e}",
-                        cache_path.display()
-                    );
-                    handl_plugin_engine_test::TestRunCache::new()
-                }
-            }
-        } else {
-            handl_plugin_engine_test::TestRunCache::new()
-        };
-        config = config.with_cache(cache);
-    }
-
-    let report = handl_plugin_engine_test::run_with_config(&plan, &mut config);
-
-    if cache {
-        if let Some(cache) = config.cache.as_ref() {
-            if let Err(e) = cache.save(&cache_path) {
-                eprintln!(
-                    "test: warning: failed to save cache at {}: {e}",
-                    cache_path.display()
-                );
-            }
-        }
-    }
-
-    // Render the report with the selected reporter.
-    let summary = handl_plugin_engine_test::summarize(&report);
-    let output = match report_kind.as_str() {
-        "human" | "console" => {
-            <handl_plugin_engine_test::HumanReporter as handl_plugin_engine_test::Reporter>::format(
-                &handl_plugin_engine_test::HumanReporter,
-                &report,
-                &summary,
-            )
-        }
-        "json" => {
-            <handl_plugin_engine_test::JsonReporter as handl_plugin_engine_test::Reporter>::format(
-                &handl_plugin_engine_test::JsonReporter,
-                &report,
-                &summary,
-            )
-        }
-        other => {
-            eprintln!("test: unknown report format `{other}`");
+    let request = CapabilityRequest {
+        capability: "test".into(),
+        payload,
+    };
+    let response = match host.run(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("test: {e}");
             return 2;
         }
     };
-    if report_kind == "json" {
-        println!("{output}");
-    } else {
-        print!("{output}");
+
+    // Runner warnings (e.g. cache load/save failures) — the engine reports
+    // them rather than aborting, exactly as before the reroute.
+    if let Some(warnings) = response.0.get("warnings").and_then(|v| v.as_array()) {
+        for w in warnings {
+            if let Some(msg) = w.as_str() {
+                eprintln!("test: warning: {msg}");
+            }
+        }
     }
 
-    if report.has_failures() || had_parse_error {
-        1
-    } else {
-        0
+    // Report parse errors discovered while scanning test modules.
+    let mut had_parse_error = false;
+    if let Some(errors) = response.0.get("parseErrors").and_then(|v| v.as_array()) {
+        for e in errors {
+            let file = e
+                .get("file")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>");
+            let msg = e.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            eprintln!("{file}: parse error: {msg}");
+            had_parse_error = true;
+        }
+    }
+
+    match response.0.get("status").and_then(|v| v.as_str()) {
+        Some("list") => {
+            if let Some(cases) = response.0.get("cases").and_then(|v| v.as_array()) {
+                for case in cases {
+                    let name = case.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let module = case.get("module").and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{name} ({module})");
+                }
+            }
+            if had_parse_error { 1 } else { 0 }
+        }
+        Some("ok") | Some("failed") => {
+            let rendered = response
+                .0
+                .get("report")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            // The JSON reporter emits a single line; the human reporter has
+            // its own trailing newline — same split as before the reroute.
+            if report_kind == "json" {
+                println!("{rendered}");
+            } else {
+                print!("{rendered}");
+            }
+            let run_failed = response.0.get("status").and_then(|v| v.as_str()) == Some("failed");
+            if run_failed || had_parse_error { 1 } else { 0 }
+        }
+        other => {
+            eprintln!("test: unexpected capability status {other:?}");
+            2
+        }
     }
 }
 

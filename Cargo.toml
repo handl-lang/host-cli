@@ -32,9 +32,9 @@ handl-plugin-ext-lint.workspace = true
 handl-plugin-ext-diag.workspace = true
 handl-plugin-engine-typecheck.workspace = true
 handl-plugin-ext-refinement.workspace = true
-handl-plugin-engine-test = { path = "../plugin-engine-test" }
+handl-plugin-ext-test.workspace = true
+handl-plugin-ext-typecheck.workspace = true
 handl-plugin-engine-fmt.workspace = true
-handl-plugin-lib-scheduler.workspace = true
 handl-plugin-ext-sdkgen.workspace = true
 handl-plugin-compile.workspace = true
 handl-plugin-compile-js.workspace = true
