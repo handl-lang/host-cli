@@ -68,14 +68,28 @@ pub fn native(
     Arc::new(registry)
 }
 
+/// Whether `kind` is the arrow form, via the `arrow` face (ADR-0123),
+/// falling back to the canonical `dim_arrow` for face-less languages/kits.
+///
+/// The dimension-analysis pass is written against the arrow shape; naming the
+/// face instead of the kind means a language that spells it differently still
+/// works, and keeps the four checks in this file consistent.
+fn is_arrow_kind(lang: &Language, kind: &str) -> bool {
+    if lang.declares_faces(kind) {
+        lang.shape_has_face(kind, "arrow")
+    } else {
+        kind == "dim_arrow"
+    }
+}
+
 /// Indices of every node inside a `dim_arrow` node (the `~[N]~>` source,
 /// dimension, and target subtrees). The optimizer pass must not rewrite
 /// these: they are the quoted terms rules and certificates talk about.
-pub fn dim_arrow_subtrees(ast: &Ast) -> HashSet<usize> {
+pub fn dim_arrow_subtrees(ast: &Ast, lang: &Language) -> HashSet<usize> {
     let mut protected = HashSet::new();
     for i in 0..ast.len() {
         let r = AstRef::new(i);
-        if ast.get(r).is_some_and(|n| n.kind == "dim_arrow") {
+        if ast.get(r).is_some_and(|n| is_arrow_kind(lang, &n.kind)) {
             for c in child_refs(ast.get(r).unwrap()) {
                 collect_descendants(ast, c, &mut protected);
             }
@@ -314,7 +328,7 @@ pub fn run(rules_path: &str, prog_path: &str) -> i32 {
 
     for (ast, _) in &prog_stmts {
         if let Some(value_ref) = pipeline_value(ast, lang) {
-            let protected = Arc::new(dim_arrow_subtrees(ast));
+            let protected = Arc::new(dim_arrow_subtrees(ast, lang));
             let engine = RewriteEngine::new().with_native_registry(native(
                 rules.clone(),
                 protected,
@@ -357,7 +371,7 @@ fn collect_at(
     rules: &mut Vec<Rule>,
 ) {
     let Some(node) = ast.get(r) else { return };
-    if node.kind == "dim_arrow" {
+    if is_arrow_kind(lang, &node.kind) {
         if let (Some(src), Some(dim), Some(tgt)) = (
             child_ref(node, lang, "source"),
             child_ref(node, lang, "dim"),
@@ -444,7 +458,7 @@ pub fn dim_env(ast: &Ast, lang: &Language) -> HashMap<String, u64> {
             } else {
                 let v = unwrap_paren(ast, AstRef::new(v), lang);
                 if let Some(vn) = ast.get(v) {
-                    if vn.kind == "dim_arrow" {
+                    if is_arrow_kind(lang, &vn.kind) {
                         if let Some(dim) = child_ref(vn, lang, "dim") {
                             if let Some(RuleDim::Fixed(k)) = rule_dim(ast, AstRef::new(dim), &env) {
                                 env.insert(name, k);
@@ -498,7 +512,7 @@ fn rule_dim(ast: &Ast, r: AstRef, consts: &HashMap<String, u64>) -> Option<RuleD
 fn cell_dim(ast: &Ast, r: AstRef, lang: &Language, env: &HashMap<String, u64>) -> Option<u64> {
     let r = unwrap_paren(ast, r, lang);
     let node = ast.get(r)?;
-    if node.kind == "dim_arrow" {
+    if is_arrow_kind(lang, &node.kind) {
         let dim = child_ref(node, lang, "dim")?;
         return match rule_dim(ast, AstRef::new(dim), env)? {
             RuleDim::Fixed(k) => Some(k),

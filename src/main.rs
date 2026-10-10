@@ -1208,7 +1208,7 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
     bound.extend(typecheck_wire_prelude().iter().cloned());
     let env = transform_categorical::dim_env(&ast, lang);
     let rules = transform_categorical::collect_rules(&ast, &bound, &env, lang);
-    let protected = Arc::new(transform_categorical::dim_arrow_subtrees(&ast));
+    let protected = Arc::new(transform_categorical::dim_arrow_subtrees(&ast, lang));
     let engine = handl_plugin_engine_transform_rewrite::RewriteEngine::new().with_native_registry(
         transform_categorical::native(rules, protected, Arc::new(env)),
     );
