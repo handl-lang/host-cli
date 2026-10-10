@@ -42,6 +42,7 @@ use std::sync::Arc;
 use handl_kit_canonical::Kit;
 use handl_language::{AstRef, LangError, Language, Source};
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
+use handl_plugin_ext_diag::Diagnostic;
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_engine_lex_pattern::DataLexerEngine;
 use handl_plugin_engine_parse_pratt::PrattEngine;
@@ -297,6 +298,16 @@ fn fmt_command(args: &[String]) -> i32 {
 
     let mut had_failure = false;
 
+    // One host for the whole command; the capability path is the same one a
+    // third-party consumer uses (ADR-0085 wiring, step 4).
+    let mut host = match tooling_host() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("fmt: tooling host unavailable: {e}");
+            return 2;
+        }
+    };
+
     if paths.is_empty() {
         // Read from stdin.
         let mut src = String::new();
@@ -304,7 +315,7 @@ fn fmt_command(args: &[String]) -> i32 {
             eprintln!("fmt: failed to read stdin");
             return 2;
         }
-        let code = fmt_one(&src, "<stdin>", check, write, &mut had_failure);
+        let code = fmt_one(&mut host, &src, "<stdin>", check, write, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -319,7 +330,7 @@ fn fmt_command(args: &[String]) -> i32 {
                 return 2;
             }
         };
-        let code = fmt_one(&src, path, check, write, &mut had_failure);
+        let code = fmt_one(&mut host, &src, path, check, write, &mut had_failure);
         if code == 2 {
             return 2;
         }
@@ -328,46 +339,89 @@ fn fmt_command(args: &[String]) -> i32 {
     if had_failure { 1 } else { 0 }
 }
 
+/// A host with the tooling plugins registered, so the CLI reaches `fmt` and
+/// `lint` through the same capability contract a third party (or `host-lsp`)
+/// uses — ADR-0085 wiring, step 4. Built once per command: plugin
+/// construction is cheap, `load`/`resolve_composition` are not.
+fn tooling_host() -> Result<DefaultHost, PlatformError> {
+    let mut host = DefaultHost::new();
+    host.register_plugin(handl_plugin_ext_fmt::FmtPlugin::new());
+    host.register_plugin(handl_plugin_ext_lint::LintPlugin::new());
+    host.load()?;
+    host.resolve_composition()
+        .map_err(|e| PlatformError::Plugin(format!("tooling composition: {e}")))?;
+    Ok(host)
+}
+
 /// Format a single source. Returns 2 on parse error (and sets `had_failure`
 /// for check failures). Otherwise returns 0.
-fn fmt_one(src: &str, path: &str, check: bool, write: bool, had_failure: &mut bool) -> i32 {
+///
+/// Dispatches through the `fmt` capability rather than calling the crate's
+/// free functions, so the CLI and any other capability consumer are the same
+/// code path. The plugin returns a structured diagnostic on failure, which is
+/// what makes this reroute lossless: `render_diagnostic` gets the span it had
+/// before, instead of a flattened error string.
+fn fmt_one(
+    host: &mut DefaultHost,
+    src: &str,
+    path: &str,
+    check: bool,
+    write: bool,
+    had_failure: &mut bool,
+) -> i32 {
     if detect_dialect(src) != Dialect::Canonical {
         eprintln!("skipping dialect file: {path}");
         return 0;
     }
 
-    if check {
-        match handl_plugin_ext_fmt::check_source(src) {
-            Ok(true) => 0,
-            Ok(false) => {
-                println!("{path}: not canonical");
-                *had_failure = true;
-                0
-            }
-            Err(err) => {
-                let diag = handl_plugin_ext_fmt::format_error_to_diagnostic(&err, src);
-                eprintln!("{}", render_diagnostic(&diag, path));
-                2
-            }
+    let request = CapabilityRequest {
+        capability: "fmt".into(),
+        payload: json!({ "source": src, "check": check }),
+    };
+    let response = match host.run(&request) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("fmt: {path}: {e}");
+            return 2;
         }
-    } else {
-        match handl_plugin_ext_fmt::format_source(src) {
-            Ok(formatted) => {
-                if write {
-                    if let Err(e) = write_atomic(path, &formatted) {
-                        eprintln!("fmt: failed to write {path}: {e}");
-                        return 2;
-                    }
-                } else {
-                    print!("{formatted}");
+    };
+
+    match response.0.get("status").and_then(|v| v.as_str()) {
+        Some("canonical") => 0,
+        Some("not-canonical") => {
+            println!("{path}: not canonical");
+            *had_failure = true;
+            0
+        }
+        Some("formatted") => {
+            let formatted = response
+                .0
+                .get("output")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if write {
+                if let Err(e) = write_atomic(path, formatted) {
+                    eprintln!("fmt: failed to write {path}: {e}");
+                    return 2;
                 }
-                0
+            } else {
+                print!("{formatted}");
             }
-            Err(err) => {
-                let diag = handl_plugin_ext_fmt::format_error_to_diagnostic(&err, src);
-                eprintln!("{}", render_diagnostic(&diag, path));
-                2
-            }
+            0
+        }
+        Some("error") => {
+            let diag: Diagnostic = response
+                .0
+                .get("diagnostic")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+            eprintln!("{}", render_diagnostic(&diag, path));
+            2
+        }
+        other => {
+            eprintln!("fmt: {path}: unexpected capability status {other:?}");
+            2
         }
     }
 }
