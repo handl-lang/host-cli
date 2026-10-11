@@ -25,7 +25,6 @@ handl-kit-canonical.workspace = true
 handl-kit-data.workspace = true
 handl-kit-data-canonical.workspace = true
 handl-language.workspace = true
-handl-value = { path = "../handl-value" }
 handl-host-tooling.workspace = true
 handl-plugin-ext-fmt.workspace = true
 handl-plugin-ext-lint.workspace = true
