@@ -381,7 +381,14 @@ fn tooling_host() -> Result<DefaultHost, PlatformError> {
             with_tooling_kit(|kit| kit.typecheck_handl_with_prelude(src, prelude))
         }),
     ));
-    host.register_plugin(handl_plugin_ext_test::TestPlugin::new());
+    host.register_plugin(handl_plugin_ext_test::TestPlugin::new(Arc::new(|| {
+        with_tooling_kit(|kit| {
+            Ok::<_, String>(handl_plugin_engine_test::base_runtime(
+                kit.runtime(),
+                kit.module_root().map(Path::to_path_buf),
+            ))
+        })
+    })));
     host.load()?;
     host.resolve_composition()
         .map_err(|e| PlatformError::Plugin(format!("tooling composition: {e}")))?;
