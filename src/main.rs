@@ -213,7 +213,9 @@ fn dispatch(p: ParsedArgs) -> i32 {
         "compile" => compile_command(&command_args),
         "gen-grammar" => gen_grammar(&kit_name, command_args.first().map(String::as_str)),
         // SDK generator: `hnl sdkgen c <header> --output <dir> [...]`.
-        "sdkgen" => handl_plugin_ext_sdkgen::sdkgen_command(&command_args),
+        "sdkgen" => with_tooling_kit(|kit| {
+            handl_plugin_ext_sdkgen::sdkgen_command(kit.lang(), &command_args)
+        }),
         // Unknown commands go through the `cli` capability dispatch.
         _ => cli_dispatch(
             &applier_id,
@@ -367,7 +369,9 @@ fn with_tooling_kit<R>(f: impl FnOnce(&Kit) -> R) -> R {
 /// construction is cheap, `load`/`resolve_composition` are not.
 fn tooling_host() -> Result<DefaultHost, PlatformError> {
     let mut host = DefaultHost::new();
-    host.register_plugin(handl_plugin_ext_fmt::FmtPlugin::new());
+    host.register_plugin(handl_plugin_ext_fmt::FmtPlugin::new(
+        with_tooling_kit(|kit| Arc::new(kit.language().clone())),
+    ));
     host.register_plugin(handl_plugin_ext_lint::LintPlugin::new(with_tooling_kit(
         |kit| {
             handl_plugin_ext_lint::LintContext::with_resolver(
