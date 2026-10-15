@@ -2083,6 +2083,13 @@ fn cli_dispatch(
         config_path.to_string(),
         kit_name.to_string(),
         applier_id.to_string(),
+        // Kit composition is data, and the kit manifests live in
+        // `handl-kit-data-canonical` — the host (which keeps that dep)
+        // injects the resolver as a capture-less closure (ADR-0128 §"The
+        // 0.8 seam").
+        Arc::new(|name: &str| {
+            handl_kit_data_canonical::kit_module_names(name).map_err(|e| e.to_string())
+        }),
     ));
     host.register_plugin(BasicCli::new());
     if let Err(e) = host.load() {
