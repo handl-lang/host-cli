@@ -339,6 +339,28 @@ fn fmt_command(args: &[String]) -> i32 {
     if had_failure { 1 } else { 0 }
 }
 
+thread_local! {
+    /// The canonical kit, memoized per thread for the tooling plugins.
+    ///
+    /// `Plugin: Send + Sync` forbids storing a `Kit` (`!Sync`) in a plugin —
+    /// so per ADR-0128 §"The 0.8 seam" the host owns the kit cache here and
+    /// injects *capture-less* closures that read it, keeping every tooling
+    /// plugin a pure adapter with no `handl-kit-canonical` in its signature.
+    static TOOLING_KIT: std::cell::RefCell<Option<Kit>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` with the thread-cached canonical kit, assembling on first use.
+fn with_tooling_kit<R>(f: impl FnOnce(&Kit) -> R) -> R {
+    TOOLING_KIT.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(Kit::new().expect("canonical kit must assemble"));
+        }
+        f(slot.as_ref().expect("kit populated above"))
+    })
+}
+
 /// A host with the tooling plugins registered, so the CLI reaches `fmt` and
 /// `lint` through the same capability contract a third party (or `host-lsp`)
 /// uses — ADR-0085 wiring, step 4. Built once per command: plugin
@@ -346,8 +368,19 @@ fn fmt_command(args: &[String]) -> i32 {
 fn tooling_host() -> Result<DefaultHost, PlatformError> {
     let mut host = DefaultHost::new();
     host.register_plugin(handl_plugin_ext_fmt::FmtPlugin::new());
-    host.register_plugin(handl_plugin_ext_lint::LintPlugin::new());
-    host.register_plugin(handl_plugin_ext_typecheck::TypecheckPlugin::new());
+    host.register_plugin(handl_plugin_ext_lint::LintPlugin::new(with_tooling_kit(
+        |kit| {
+            handl_plugin_ext_lint::LintContext::with_resolver(
+                kit.language().clone(),
+                kit.handl_lint_adapter().resolver(),
+            )
+        },
+    )));
+    host.register_plugin(handl_plugin_ext_typecheck::TypecheckPlugin::new(
+        Arc::new(|src, prelude| {
+            with_tooling_kit(|kit| kit.typecheck_handl_with_prelude(src, prelude))
+        }),
+    ));
     host.register_plugin(handl_plugin_ext_test::TestPlugin::new());
     host.load()?;
     host.resolve_composition()
@@ -601,9 +634,9 @@ fn lint_one(
 
     // Same capability path a third-party consumer uses (ADR-0085 step 4). The
     // caller's `language` rides in the payload (ADR-0124) so a capability lint
-    // matches a direct call — this crate's built-in default is `lint_language()`
-    // while the CLI's is `load_canonical_language()`, and two "canonical"
-    // languages can carry different rules.
+    // matches a direct call — the plugin's injected default is the tooling
+    // kit's language while the CLI's is `load_canonical_language()`, and two
+    // "canonical" languages can carry different rules.
     let mut payload = json!({ "source": src, "prelude": prelude });
     if let Some(l) = lang_json {
         payload["language"] = l.clone();
@@ -657,8 +690,8 @@ fn lint_one(
     }
 
     if fix {
-        // `fix` does not honour a caller-supplied language (no
-        // `fix_source_with_language` variant exists) — see LintPlugin.
+        // `fix` runs through the plugin's injected lint context — see
+        // LintPlugin.
         let fix_request = CapabilityRequest {
             capability: "lint".into(),
             payload: json!({ "source": src, "fix": true, "prelude": prelude }),
