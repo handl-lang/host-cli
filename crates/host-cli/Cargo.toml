@@ -56,7 +56,7 @@ handl-plugin-compile = { git = "https://github.com/handl-lang/platform", branch 
 # The six compile targets — optional, behind the features above. Their
 # git sources are the *target* repos (ADR-0128: the `hnl` binary's target
 # set is its dep list); the workspace-root `[patch]` tables resolve the
-# sibling checkouts, and `pin-git-revs.py` keeps revs in lockstep.
+# sibling checkouts; `pin-git-revs.py` pins them to `rev` at release.
 handl-plugin-compile-js = { git = "https://github.com/handl-lang/web", branch = "main", optional = true }
 handl-plugin-compile-llvm = { git = "https://github.com/handl-lang/native", branch = "main", optional = true }
 handl-plugin-compile-handl = { git = "https://github.com/handl-lang/handl", branch = "main", optional = true }
