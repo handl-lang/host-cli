@@ -2212,12 +2212,21 @@ fn compile_command(args: &[String]) -> i32 {
         report,
     );
 
+    // The compile-target set is the host manifest's feature list
+    // (ADR-0128 §0.3): each arm is compiled only when the target's repo
+    // module is linked in.
     let config: Box<dyn handl_plugin_compile::CompilerConfig> = match request.target.as_str() {
+        #[cfg(feature = "js")]
         "js" => build_js_config(&request),
+        #[cfg(feature = "llvm")]
         "llvm" => build_llvm_config(&request),
+        #[cfg(feature = "handl")]
         "handl" => build_handl_config(&request),
+        #[cfg(feature = "term")]
         "term" => build_term_config(&request),
+        #[cfg(feature = "dot")]
         "dot" => build_dot_config(&request),
+        #[cfg(feature = "sexp")]
         "sexp" => build_sexp_config(&request),
         other => {
             eprintln!("compile: unsupported target `{other}`");
@@ -2250,6 +2259,7 @@ fn compile_command(args: &[String]) -> i32 {
     0
 }
 
+#[cfg(feature = "js")]
 fn build_js_config(
     req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
@@ -2280,6 +2290,7 @@ fn build_js_config(
     })
 }
 
+#[cfg(feature = "llvm")]
 fn build_llvm_config(
     req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
@@ -2291,6 +2302,7 @@ fn build_llvm_config(
     Box::new(cfg)
 }
 
+#[cfg(feature = "handl")]
 fn build_handl_config(
     req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
@@ -2300,6 +2312,7 @@ fn build_handl_config(
     Box::new(HandlConfig::new(to))
 }
 
+#[cfg(feature = "term")]
 fn build_term_config(
     req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
@@ -2309,6 +2322,7 @@ fn build_term_config(
     Box::new(TermConfig::new(emit))
 }
 
+#[cfg(feature = "dot")]
 fn build_dot_config(
     _req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
@@ -2317,6 +2331,7 @@ fn build_dot_config(
     Box::new(DotConfig::new())
 }
 
+#[cfg(feature = "sexp")]
 fn build_sexp_config(
     _req: &handl_plugin_ext_compile::CompileFileRequest,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
