@@ -15,37 +15,37 @@ name = "handl_host_cli"
 path = "src/lib.rs"
 
 [dependencies]
-handl-platform = { git = "https://github.com/handl-lang/platform" }
-handl-runtime = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-lex-pattern = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-parse = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-parse-pratt = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-transform = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-transform-rewrite = { git = "https://github.com/handl-lang/platform" }
+handl-platform = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-runtime = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-lex-pattern = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-parse = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-parse-pratt = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-transform = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-transform-rewrite = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
 handl-plugin-ext-cli = { path = "../plugin-ext-cli" }
-handl-plugin-applier-bootstrap = { git = "https://github.com/handl-lang/platform" }
-handl-kit-canonical = { git = "https://github.com/handl-lang/kit-canonical" }
-handl-kit-data = { git = "https://github.com/handl-lang/platform" }
-handl-kit-data-canonical = { git = "https://github.com/handl-lang/lang" }
-handl-language = { git = "https://github.com/handl-lang/platform" }
-handl-host-tooling = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-fmt = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-lint = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-diag = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-typecheck = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-test = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-refinement = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-test = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-typecheck = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-engine-fmt = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-sdkgen = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-js = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-llvm = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-handl = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-term = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-dot = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-compile-sexp = { git = "https://github.com/handl-lang/platform" }
-handl-kit-arrow-lower = { git = "https://github.com/handl-lang/platform" }
-handl-plugin-ext-compile = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-applier-bootstrap = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-kit-canonical = { git = "https://github.com/handl-lang/kit-canonical", rev = "a7392e49efb729021234b094df02155796d50f4c" }
+handl-kit-data = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-kit-data-canonical = { git = "https://github.com/handl-lang/lang", rev = "4f0f2faa4f70381552491cb3f25fd6a82d819937" }
+handl-language = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-host-tooling = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-fmt = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-lint = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-diag = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-typecheck = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-test = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-refinement = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-test = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-typecheck = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-engine-fmt = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-sdkgen = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-js = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-llvm = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-handl = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-term = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-dot = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-compile-sexp = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-kit-arrow-lower = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
+handl-plugin-ext-compile = { git = "https://github.com/handl-lang/platform", rev = "fda7eda807912fdf49d22986accb3d380cca74f3" }
 serde_json = "1"
