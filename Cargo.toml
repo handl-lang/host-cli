@@ -55,15 +55,15 @@ handl-language = { path = "../platform/crates/handl-language" }
 handl-platform = { path = "../platform/crates/platform" }
 handl-plugin-applier-bootstrap = { path = "../platform/crates/plugin-applier-bootstrap" }
 handl-plugin-compile = { path = "../platform/crates/plugin-compile" }
-handl-plugin-compile-dot = { path = "../platform/crates/plugin-compile-dot" }
-handl-plugin-compile-handl = { path = "../platform/crates/plugin-compile-handl" }
-handl-plugin-compile-js = { path = "../platform/crates/plugin-compile-js" }
-handl-plugin-compile-llvm = { path = "../platform/crates/plugin-compile-llvm" }
-handl-plugin-compile-sexp = { path = "../platform/crates/plugin-compile-sexp" }
-handl-plugin-compile-term = { path = "../platform/crates/plugin-compile-term" }
+handl-plugin-compile-dot = { path = "../dot/modules/compile-dot" }
+handl-plugin-compile-handl = { path = "../handl/modules/compile-handl" }
+handl-plugin-compile-js = { path = "../web/modules/compile-js" }
+handl-plugin-compile-llvm = { path = "../native/modules/compile-llvm" }
+handl-plugin-compile-sexp = { path = "../sexp/modules/compile-sexp" }
+handl-plugin-compile-term = { path = "../term/modules/compile-term" }
 handl-plugin-engine-exec = { path = "../platform/crates/plugin-engine-exec" }
 handl-plugin-engine-exec-bytecode = { path = "../platform/crates/plugin-engine-exec-bytecode" }
-handl-plugin-engine-exec-cranelift = { path = "../platform/crates/plugin-engine-exec-cranelift" }
+handl-plugin-engine-exec-cranelift = { path = "../native/modules/exec-cranelift" }
 handl-plugin-engine-exec-tree-walk = { path = "../platform/crates/plugin-engine-exec-tree-walk" }
 handl-plugin-engine-fmt = { path = "../platform/crates/plugin-engine-fmt" }
 handl-plugin-engine-lex-pattern = { path = "../platform/crates/plugin-engine-lex-pattern" }
@@ -82,10 +82,11 @@ handl-plugin-ext-refinement = { path = "../platform/crates/plugin-ext-refinement
 handl-plugin-ext-sdkgen = { path = "../platform/crates/plugin-ext-sdkgen" }
 handl-plugin-ext-test = { path = "../platform/crates/plugin-ext-test" }
 handl-plugin-ext-typecheck = { path = "../platform/crates/plugin-ext-typecheck" }
-handl-plugin-ffi = { path = "../platform/crates/plugin-ffi" }
+handl-plugin-ffi = { path = "../ffi/modules/ffi" }
 handl-plugin-lib-handl = { path = "../platform/crates/plugin-lib-handl" }
 handl-plugin-lib-tag = { path = "../platform/crates/plugin-lib-tag" }
 handl-plugin-module = { path = "../platform/crates/plugin-module" }
+handl-plugin-sdkgen = { path = "../platform/crates/plugin-sdkgen" }
 handl-runtime = { path = "../platform/crates/handl-runtime" }
 handl-value = { path = "../platform/crates/handl-value" }
 plugin-engine = { path = "../platform/crates/plugin-engine" }
@@ -94,3 +95,38 @@ plugin-engine = { path = "../platform/crates/plugin-engine" }
 # default test-thread stack in the recursive tree-walk eval.
 [profile.dev]
 opt-level = 1
+
+# The extracted target repos: the platform-HEAD manifests patched above dep
+# on these git sources; map them to the same sibling checkouts so no
+# git-sourced package enters the graph.
+[patch."https://github.com/handl-lang/python"]
+handl-plugin-sdkgen-emitter-python = { path = "../python/modules/sdkgen-python" }
+
+[patch."https://github.com/handl-lang/c"]
+handl-plugin-sdkgen-backend-c = { path = "../c/modules/sdkgen-c" }
+
+[patch."https://github.com/handl-lang/web"]
+handl-plugin-compile-js = { path = "../web/modules/compile-js" }
+handl-plugin-sdkgen-backend-webidl = { path = "../web/modules/sdkgen-webidl" }
+
+[patch."https://github.com/handl-lang/otlp"]
+handl-plugin-lib-otlp-std = { path = "../otlp/modules/lib-otlp-std" }
+
+[patch."https://github.com/handl-lang/native"]
+handl-plugin-compile-llvm = { path = "../native/modules/compile-llvm" }
+handl-plugin-engine-exec-cranelift = { path = "../native/modules/exec-cranelift" }
+
+[patch."https://github.com/handl-lang/ffi"]
+handl-plugin-ffi = { path = "../ffi/modules/ffi" }
+
+[patch."https://github.com/handl-lang/dot"]
+handl-plugin-compile-dot = { path = "../dot/modules/compile-dot" }
+
+[patch."https://github.com/handl-lang/term"]
+handl-plugin-compile-term = { path = "../term/modules/compile-term" }
+
+[patch."https://github.com/handl-lang/sexp"]
+handl-plugin-compile-sexp = { path = "../sexp/modules/compile-sexp" }
+
+[patch."https://github.com/handl-lang/handl"]
+handl-plugin-compile-handl = { path = "../handl/modules/compile-handl" }
