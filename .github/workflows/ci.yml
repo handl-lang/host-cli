@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CI_TOKEN: ${{ secrets.CI_TOKEN }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: auth for private sibling git deps
+        run: |
+          if [ -n "$CI_TOKEN" ]; then
+            git config --global url."https://x-access-token:${CI_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: check + test
+        run: |
+          if [ -f Cargo.toml ]; then
+            cargo check --workspace --all-targets
+            cargo test --workspace --no-fail-fast
+          else
+            echo "no Cargo.toml yet - code lands with its ADR-0128 phase"
+          fi
