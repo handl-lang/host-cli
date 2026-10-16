@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-handl-platform = { git = "https://github.com/handl-lang/platform", rev = "b1049cd86f22793a2959342f966beedb23c6cb11" }
+handl-platform = { git = "https://github.com/handl-lang/platform", rev = "9d34281cc717e007588e31a0f908ef55c81e7deb" }
 serde_json = "1"
 
 [dev-dependencies]
