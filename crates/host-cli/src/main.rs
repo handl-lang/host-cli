@@ -2090,6 +2090,9 @@ fn cli_dispatch(
         Arc::new(|name: &str| {
             handl_kit_data_canonical::kit_module_names(name).map_err(|e| e.to_string())
         }),
+        // §0.4: the kit supplies its library-module table — the canonical
+        // kit's populated registry, shared across loads.
+        handl_kit_canonical::canonical_library_registry(),
     ));
     host.register_plugin(BasicCli::new());
     if let Err(e) = host.load() {

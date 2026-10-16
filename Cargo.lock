@@ -515,6 +515,7 @@ dependencies = [
 name = "handl-kit-canonical"
 version = "0.1.0"
 dependencies = [
+ "handl-kit-data",
  "handl-kit-data-canonical",
  "handl-language",
  "handl-platform",
@@ -532,12 +533,14 @@ dependencies = [
  "handl-plugin-lib-char-native",
  "handl-plugin-lib-crypto",
  "handl-plugin-lib-handl",
+ "handl-plugin-lib-kv-hashmap",
  "handl-plugin-lib-lang-compile",
  "handl-plugin-lib-lang-eval",
  "handl-plugin-lib-lang-lex",
  "handl-plugin-lib-lang-parse",
  "handl-plugin-lib-lang-run-compiled",
  "handl-plugin-lib-lang-typecheck",
+ "handl-plugin-lib-otlp-std",
  "handl-plugin-lib-stdlib",
  "handl-plugin-lib-tag",
  "handl-plugin-module",
@@ -604,6 +607,7 @@ dependencies = [
 name = "handl-plugin-applier-bootstrap"
 version = "0.1.0"
 dependencies = [
+ "handl-kit-data",
  "handl-platform",
  "handl-plugin-applier",
  "handl-plugin-applier-default",
@@ -614,6 +618,7 @@ dependencies = [
 name = "handl-plugin-applier-default"
 version = "0.1.0"
 dependencies = [
+ "handl-kit-data",
  "handl-platform",
  "handl-plugin-applier",
  "handl-plugin-ext-kit",
@@ -941,10 +946,6 @@ version = "0.1.0"
 dependencies = [
  "handl-kit-data",
  "handl-platform",
- "handl-plugin-lib-crypto",
- "handl-plugin-lib-kv-hashmap",
- "handl-plugin-lib-otlp-std",
- "handl-plugin-lib-stdlib",
  "handl-plugin-module",
  "serde_json",
 ]
