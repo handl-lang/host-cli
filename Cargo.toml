@@ -2,6 +2,9 @@
 name = "handl-host-cli"
 version.workspace = true
 edition.workspace = true
+description = "`hnl` CLI internal library surface (enables `cargo test --lib`)."
+license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "hnl"
