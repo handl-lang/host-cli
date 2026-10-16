@@ -357,7 +357,15 @@ fn with_tooling_kit<R>(f: impl FnOnce(&Kit) -> R) -> R {
     TOOLING_KIT.with(|cell| {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
-            *slot = Some(Kit::new().expect("canonical kit must assemble"));
+            // Project-aware: discover `.handl.toml` from the CWD upward so
+            // `import "dep/..."` resolves against `[dependencies]` (ADR-0128
+            // Phase-5 name resolution) for `test`/`lint`/`fmt`/`typecheck`.
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            *slot = Some(
+                Kit::discover(&cwd)
+                    .or_else(|_| Kit::new())
+                    .expect("canonical kit must assemble"),
+            );
         }
         f(slot.as_ref().expect("kit populated above"))
     })
@@ -639,8 +647,9 @@ fn lint_one(
     // `from "<spec>" import *`) bind into scope at eval time — same seeding
     // as `hnl run`/`hnl typecheck`.
     let bases = spec_resolution_bases(Path::new(path), None);
+    let deps = handl_platform::discover_dependencies(Path::new(path)).unwrap_or_default();
     let mut seeded = prelude.clone();
-    seeded.extend(spliced_import_names(src, &bases));
+    seeded.extend(spliced_import_names(src, &bases, &deps));
     let prelude: Vec<String> = seeded.into_iter().collect();
 
     // Same capability path a third-party consumer uses (ADR-0085 step 4). The
@@ -754,8 +763,11 @@ fn typecheck_command(args: &[String]) -> i32 {
     }
 
     // The canonical `Language` is assembled once here (single YAML→Language
-    // path via `handl-kit-canonical`) and injected into the checker.
-    let kit = match Kit::new() {
+    // path via `handl-kit-canonical`) and injected into the checker. Project
+    // discovery wires `.handl.toml` `[dependencies]` so dep-named imports
+    // typecheck the same way they eval (ADR-0128 Phase-5 name resolution).
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let kit = match Kit::discover(&cwd) {
         Ok(k) => k,
         Err(e) => {
             eprintln!("typecheck: {e}");
@@ -854,7 +866,10 @@ fn typecheck_one(
     // bind the module's exports into scope at eval time — seed those names
     // so the source-only scope check sees them (same seeding as `hnl run`).
     let bases = spec_resolution_bases(Path::new(path), kit.module_root());
-    let spliced: Vec<String> = spliced_import_names(src, &bases).into_iter().collect();
+    let deps = handl_platform::discover_dependencies(Path::new(path)).unwrap_or_default();
+    let spliced: Vec<String> = spliced_import_names(src, &bases, &deps)
+        .into_iter()
+        .collect();
     // Same capability path a third-party consumer uses (ADR-0085 step 4).
     // The plugin assembles its language from the same single canonical path
     // this command does (`Kit::new`), so — unlike `lint` — no `language`
@@ -1129,14 +1144,22 @@ fn test_command(args: &[String]) -> i32 {
 /// - `from "<bare-name>" import ...` — `<spec>` names a host module
 ///   (`str`, `fn`, `dedent`, ...) or a specifier with no backing file —
 ///   the module chain supplies the bindings either way.
-fn strip_import_declarations(src: &str, bases: &[PathBuf]) -> String {
+fn strip_import_declarations(
+    src: &str,
+    bases: &[PathBuf],
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> String {
     src.lines()
-        .filter(|line| !is_import_line(line.trim_start(), bases))
+        .filter(|line| !is_import_line(line.trim_start(), bases, deps))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn is_import_line(trimmed: &str, bases: &[PathBuf]) -> bool {
+fn is_import_line(
+    trimmed: &str,
+    bases: &[PathBuf],
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> bool {
     if let Some(rest) = trimmed.strip_prefix("import") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
             // `import "spec"` / `import 'spec'` is the executable form —
@@ -1152,11 +1175,13 @@ fn is_import_line(trimmed: &str, bases: &[PathBuf]) -> bool {
     }
     if let Some(rest) = trimmed.strip_prefix("from") {
         if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') {
-            // Strip iff the specifier names a host module — i.e. does not
-            // resolve to an existing file. An unparseable line is kept so
-            // the parser reports the error.
+            // Strip iff the specifier names a host module — i.e. resolves to
+            // neither a file under `bases` nor a `[dependencies]` package
+            // (a dep-backed `from` is an executable import op and must be
+            // kept, exactly like a relative-path one). An unparseable line
+            // is kept so the parser reports the error.
             return match first_quoted_spec(rest) {
-                Some(spec) => !spec_resolves_to_file(spec, bases),
+                Some(spec) => !spec_resolves_to_file(spec, bases, deps),
                 None => false,
             };
         }
@@ -1164,19 +1189,22 @@ fn is_import_line(trimmed: &str, bases: &[PathBuf]) -> bool {
     false
 }
 
-/// Whether `<spec>` resolves to an existing file under any of `bases`
-/// (checked in order — mirroring `ModuleLoader` relative resolution:
-/// importing module's directory, module root, working directory). A
-/// `.handl.toml` `[dependencies]` specifier that resolves outside these
-/// bases is stripped like any other host-module declaration; the
-/// declaration is decorative here either way and a referenced name fails
-/// loudly downstream.
+/// Whether `<spec>` resolves to an existing file — first as a
+/// `.handl.toml` `[dependencies]` specifier (a dep name shadows a
+/// same-named relative directory, mirroring `ModuleLoader::resolve_path`),
+/// then under any of `bases` (checked in order — mirroring `ModuleLoader`
+/// relative resolution: importing module's directory, module root, working
+/// directory).
 ///
 /// A directory is treated as a package if it contains an `index.hnl` or
 /// a `<dir>/<name>.hnl` main file; a bare name without `.hnl` is tried
 /// with `.hnl` appended.
-fn spec_resolves_to_file(spec: &str, bases: &[PathBuf]) -> bool {
-    resolve_spec_path(spec, bases).is_some()
+fn spec_resolves_to_file(
+    spec: &str,
+    bases: &[PathBuf],
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> bool {
+    resolve_spec_path(spec, bases, deps).is_some()
 }
 
 /// Resolution bases for `import "<spec>"` specifiers in a file at `path`,
@@ -1202,15 +1230,39 @@ fn spec_resolution_bases(path: &Path, module_root: Option<&Path>) -> Vec<PathBuf
     bases
 }
 
-/// Resolve `<spec>` to the file `ModuleLoader` would load, under `bases`
-/// (same order as [`spec_resolves_to_file`]).
-fn resolve_spec_path(spec: &str, bases: &[PathBuf]) -> Option<PathBuf> {
+/// Resolve a `[dependencies]` specifier: when the first `/`-separated
+/// segment of `spec` names a declared dependency, the remainder resolves
+/// inside that package's directory (`dep/lib/file` →
+/// `<deps["dep"]>/lib/file`; a bare `dep` name resolves the package dir's
+/// `index.hnl`/`<name>.hnl` main file). Returns `None` for non-dep specs.
+fn resolve_dep_spec_path(
+    spec: &str,
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> Option<PathBuf> {
+    let (first, rest) = match spec.split_once('/') {
+        Some((f, r)) => (f, Some(r)),
+        None => (spec, None),
+    };
+    let dep_dir = deps.get(first)?;
+    let joined = match rest {
+        Some(r) if !r.is_empty() => dep_dir.join(r),
+        _ => dep_dir.clone(),
+    };
+    file_candidate(&joined, spec)
+}
+
+/// Resolve `<spec>` to the file `ModuleLoader` would load: dependency-name
+/// resolution first, then `bases` (same order as [`spec_resolves_to_file`]).
+fn resolve_spec_path(
+    spec: &str,
+    bases: &[PathBuf],
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> Option<PathBuf> {
     if Path::new(spec).is_absolute() {
         return file_candidate(Path::new(spec), spec);
     }
-    bases
-        .iter()
-        .find_map(|base| file_candidate(&base.join(spec), spec))
+    resolve_dep_spec_path(spec, deps)
+        .or_else(|| bases.iter().find_map(|base| file_candidate(&base.join(spec), spec)))
 }
 
 /// The specifier of a *splice-form* import — `import "<spec>"` or
@@ -1258,7 +1310,11 @@ fn splice_import_spec(trimmed: &str) -> Option<String> {
 /// `hnl typecheck`, and `hnl lint` seed these into their scope-check
 /// prelude — otherwise every use of a spliced export is reported as
 /// `unbound wire` even though eval binds it.
-fn spliced_import_names(src: &str, bases: &[PathBuf]) -> HashSet<String> {
+fn spliced_import_names(
+    src: &str,
+    bases: &[PathBuf],
+    deps: &std::collections::HashMap<String, PathBuf>,
+) -> HashSet<String> {
     let mut names = HashSet::new();
     for line in src.lines() {
         let trimmed = line.trim_start();
@@ -1268,7 +1324,7 @@ fn spliced_import_names(src: &str, bases: &[PathBuf]) -> HashSet<String> {
         let Some(spec) = splice_import_spec(trimmed) else {
             continue;
         };
-        let Some(path) = resolve_spec_path(&spec, bases) else {
+        let Some(path) = resolve_spec_path(&spec, bases, deps) else {
             continue;
         };
         let Ok(mod_src) = std::fs::read_to_string(&path) else {
@@ -1371,15 +1427,16 @@ fn run_file(path: Option<&str>, engine: Option<&str>) -> i32 {
     // Splice-form file imports (`import "<spec>"`, `from "<spec>" import *`)
     // bind the module's exports into scope at eval time — seed those names
     // so the scope check sees them.
+    let deps = handl_platform::discover_dependencies(start).unwrap_or_default();
     if detect_dialect(&source) == Dialect::Canonical {
-        let spliced = spliced_import_names(&source, &bases);
+        let spliced = spliced_import_names(&source, &bases, &deps);
         if let Err(err) = kit.typecheck_handl_with_prelude(&source, &spliced) {
             eprintln!("run: typecheck failed: {err}");
             return 1;
         }
     }
 
-    let source = strip_import_declarations(&source, &bases);
+    let source = strip_import_declarations(&source, &bases, &deps);
     let trimmed = source.trim_start();
     let wrapped = if trimmed.starts_with("do") {
         source.to_string()
