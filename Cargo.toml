@@ -2,6 +2,9 @@
 name = "handl-plugin-ext-cli"
 version.workspace = true
 edition.workspace = true
+description = "CLI extension — the `cli` capability adapter."
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 handl-platform = { path = "../platform" }
