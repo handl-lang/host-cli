@@ -15,37 +15,37 @@ name = "handl_host_cli"
 path = "src/lib.rs"
 
 [dependencies]
-handl-platform.workspace = true
-handl-runtime.workspace = true
-handl-plugin-engine-lex-pattern.workspace = true
-handl-plugin-engine-parse.workspace = true
-handl-plugin-engine-parse-pratt.workspace = true
-handl-plugin-engine-transform.workspace = true
-handl-plugin-engine-transform-rewrite.workspace = true
-handl-plugin-ext-cli.workspace = true
-handl-plugin-applier-bootstrap.workspace = true
-handl-kit-canonical.workspace = true
-handl-kit-data.workspace = true
-handl-kit-data-canonical.workspace = true
-handl-language.workspace = true
-handl-host-tooling.workspace = true
-handl-plugin-ext-fmt.workspace = true
-handl-plugin-ext-lint.workspace = true
-handl-plugin-ext-diag.workspace = true
-handl-plugin-engine-typecheck.workspace = true
-handl-plugin-engine-test.workspace = true
-handl-plugin-ext-refinement.workspace = true
-handl-plugin-ext-test.workspace = true
-handl-plugin-ext-typecheck.workspace = true
-handl-plugin-engine-fmt.workspace = true
-handl-plugin-ext-sdkgen.workspace = true
-handl-plugin-compile.workspace = true
-handl-plugin-compile-js.workspace = true
-handl-plugin-compile-llvm.workspace = true
-handl-plugin-compile-handl.workspace = true
-handl-plugin-compile-term.workspace = true
-handl-plugin-compile-dot.workspace = true
-handl-plugin-compile-sexp.workspace = true
-handl-kit-arrow-lower.workspace = true
-handl-plugin-ext-compile.workspace = true
-serde_json.workspace = true
+handl-platform = { git = "https://github.com/handl-lang/platform" }
+handl-runtime = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-lex-pattern = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-parse = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-parse-pratt = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-transform = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-transform-rewrite = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-cli = { path = "../plugin-ext-cli" }
+handl-plugin-applier-bootstrap = { git = "https://github.com/handl-lang/platform" }
+handl-kit-canonical = { git = "https://github.com/handl-lang/kit-canonical" }
+handl-kit-data = { git = "https://github.com/handl-lang/platform" }
+handl-kit-data-canonical = { git = "https://github.com/handl-lang/lang" }
+handl-language = { git = "https://github.com/handl-lang/platform" }
+handl-host-tooling = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-fmt = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-lint = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-diag = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-typecheck = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-test = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-refinement = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-test = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-typecheck = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-engine-fmt = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-sdkgen = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-js = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-llvm = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-handl = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-term = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-dot = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-compile-sexp = { git = "https://github.com/handl-lang/platform" }
+handl-kit-arrow-lower = { git = "https://github.com/handl-lang/platform" }
+handl-plugin-ext-compile = { git = "https://github.com/handl-lang/platform" }
+serde_json = "1"

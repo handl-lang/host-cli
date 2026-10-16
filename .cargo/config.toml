@@ -1,0 +1,6 @@
+# The canonical-kit eval tests recurse deep enough in the tree-walk engine
+# to overflow libtest's default 8 MiB thread stack in this repo's build
+# (fp_integration::flow_applies_closure_to_left, lib tests). 32 MiB matches
+# what the platform suite effectively gets.
+[env]
+RUST_MIN_STACK = "33554432"
