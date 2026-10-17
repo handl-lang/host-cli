@@ -44,6 +44,8 @@ use handl_language::{AstRef, LangError, Language, Source};
 use handl_platform::{CapabilityRequest, DefaultHost, PlatformError};
 use handl_plugin_applier_bootstrap::BootstrapPlugin;
 use handl_plugin_engine_lex_pattern::DataLexerEngine;
+#[cfg(feature = "js")]
+use handl_plugin_engine_parse::{ParserEngine, ParserRequest};
 use handl_plugin_engine_parse_pratt::PrattEngine;
 use handl_plugin_ext_cli::BasicCli;
 use handl_plugin_ext_diag::Diagnostic;
@@ -2262,22 +2264,14 @@ fn compile_command(args: &[String]) -> i32 {
         }
     };
 
-    let report = handl_plugin_engine_typecheck::TypecheckReport::default();
-    let input = handl_plugin_compile::CompilerInput::new(
-        src,
-        ast,
-        root,
-        runtime.lang().clone(),
-        term,
-        report,
-    );
-
     // The compile-target set is the host manifest's feature list
     // (ADR-0128 §0.3): each arm is compiled only when the target's repo
-    // module is linked in.
+    // module is linked in. Built before `CompilerInput` so the js arm can
+    // resolve the entry file's import graph from `src` (`src` moves into
+    // the input below).
     let config: Box<dyn handl_plugin_compile::CompilerConfig> = match request.target.as_str() {
         #[cfg(feature = "js")]
-        "js" => build_js_config(&request),
+        "js" => build_js_config(&request, runtime.lang(), &src),
         #[cfg(feature = "llvm")]
         "llvm" => build_llvm_config(&request),
         #[cfg(feature = "handl")]
@@ -2293,6 +2287,16 @@ fn compile_command(args: &[String]) -> i32 {
             return 2;
         }
     };
+
+    let report = handl_plugin_engine_typecheck::TypecheckReport::default();
+    let input = handl_plugin_compile::CompilerInput::new(
+        src,
+        ast,
+        root,
+        runtime.lang().clone(),
+        term,
+        report,
+    );
 
     let dispatcher = handl_plugin_ext_compile::CompileDispatcher::new();
     let output = match dispatcher.compile(&request.target, input, config.as_ref()) {
@@ -2322,6 +2326,8 @@ fn compile_command(args: &[String]) -> i32 {
 #[cfg(feature = "js")]
 fn build_js_config(
     req: &handl_plugin_ext_compile::CompileFileRequest,
+    lang: &Language,
+    src: &str,
 ) -> Box<dyn handl_plugin_compile::CompilerConfig> {
     use handl_plugin_compile_js::{
         CommonJs, Deno, Esm, Iife, Inline, JsConfig, JsOutputFormat, JsTarget,
@@ -2341,13 +2347,135 @@ fn build_js_config(
         }
     };
 
+    let (modules, entry_imports) = js_module_graph(&req.path, src, lang);
+
     Box::new(JsConfig {
         target,
         format,
         debug: req.debug,
         no_inline_foreign: false,
         source_map: req.source_map,
+        modules,
+        entry_imports,
     })
+}
+
+/// The `.hnl` import graph for `hnl compile js` (ADR-0128 Phase 5):
+/// walk the entry file's top-level `stmt.import` specs — the same
+/// statement granularity compile-js's module emit sees — resolve each
+/// with [`resolve_spec_path`] (`[dependencies]` name first, then the
+/// `ModuleLoader` bases: the importing file's directory, the module
+/// root, the working directory), and recurse into each resolved file.
+///
+/// The result rides to the compiler in `JsConfig::modules` +
+/// `entry_imports`; the compiler itself never touches the filesystem.
+/// Specs that resolve to no file (host modules like `js`/`str`, or
+/// plain missing paths) produce no edge and keep their
+/// `__handl_rt`/ES-import emit.
+#[cfg(feature = "js")]
+fn js_module_graph(
+    entry: &Path,
+    entry_src: &str,
+    lang: &Language,
+) -> (
+    Vec<handl_plugin_compile_js::JsModule>,
+    Vec<(String, String)>,
+) {
+    let deps = handl_platform::discover_dependencies(entry).unwrap_or_default();
+    let module_root = handl_platform::discover_manifest_dir(entry);
+    let mut seen = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    // The entry file is marked seen but never queued: a dep importing
+    // it back is a circular import (the compiler errors on the missing
+    // edge), not a second module.
+    if let Ok(canon) = std::fs::canonicalize(entry) {
+        seen.insert(canon);
+    }
+
+    let mut entry_imports = Vec::new();
+    let entry_bases = spec_resolution_bases(entry, module_root.as_deref());
+    for spec in module_import_specs(lang, entry_src) {
+        if let Some(path) = resolve_spec_path(&spec, &entry_bases, &deps) {
+            let canon = std::fs::canonicalize(&path).unwrap_or(path);
+            entry_imports.push((spec, canon.to_string_lossy().into_owned()));
+            if seen.insert(canon.clone()) {
+                queue.push_back(canon);
+            }
+        }
+    }
+
+    let mut modules = Vec::new();
+    while let Some(path) = queue.pop_front() {
+        let Ok(src) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        // Nested imports resolve against the dep file's own directory
+        // first — `ModuleLoader`'s `dir_stack` order.
+        let bases = spec_resolution_bases(&path, module_root.as_deref());
+        let mut imports = Vec::new();
+        for spec in module_import_specs(lang, &src) {
+            if let Some(p) = resolve_spec_path(&spec, &bases, &deps) {
+                let canon = std::fs::canonicalize(&p).unwrap_or(p);
+                imports.push((spec, canon.to_string_lossy().into_owned()));
+                if seen.insert(canon.clone()) {
+                    queue.push_back(canon);
+                }
+            }
+        }
+        modules.push(handl_plugin_compile_js::JsModule {
+            path: path.to_string_lossy().into_owned(),
+            source: src,
+            imports,
+        });
+    }
+    (modules, entry_imports)
+}
+
+/// Top-level import specifiers in `src`: `stmt.import` nodes' `path`
+/// payload (`from "<spec>" …`) or string child (bare `import "<spec>"`),
+/// at the same per-statement granularity compile-js's module emit uses.
+/// Best-effort: a chunk that fails to lex/parse yields no spec — the
+/// compiler's own statement pass reports the real error.
+#[cfg(feature = "js")]
+fn module_import_specs(lang: &Language, src: &str) -> Vec<String> {
+    let mut specs = Vec::new();
+    for chunk in handl_plugin_ext_diag::split_statements(src) {
+        let Ok(tokens) = handl_plugin_engine_lex_pattern::lex(lang, &chunk.text) else {
+            continue;
+        };
+        if tokens.as_slice().is_empty() {
+            continue;
+        }
+        let req = ParserRequest::new(tokens);
+        let Ok(ast) = PrattEngine::new().parse(lang, &req) else {
+            continue;
+        };
+        let Some(node) = ast.get(AstRef::new(ast.len() - 1)) else {
+            continue;
+        };
+        if node.kind != "stmt.import" {
+            continue;
+        }
+        let spec = node
+            .payload
+            .get("path")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| {
+                node.payload
+                    .get("children")
+                    .and_then(|c| c.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|v| v.as_u64())
+                    .and_then(|i| ast.get(AstRef::new(i as usize)))
+                    .and_then(|n| n.payload.as_str().map(String::from))
+            });
+        if let Some(spec) = spec {
+            specs.push(spec);
+        }
+    }
+    specs
 }
 
 #[cfg(feature = "llvm")]
