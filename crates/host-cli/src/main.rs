@@ -2437,6 +2437,22 @@ fn compact_arrows(value: &Value, lang: &Language, source: Option<&str>) -> Value
     if let Some(s) = arrow_display(value, lang, source, None, 0) {
         return Value::String(s);
     }
+    // A serialized `Term` is a single-key JSON object tagged by its
+    // combinator (`{"Op": …}`, `{"Seq": …}`…). Module records embed them
+    // under `binds`/`body_term`; printing the raw JSON dumps the full
+    // program — collapse to a marker like the arrow collapse.
+    if let Value::Object(o) = value {
+        if o.len() == 1 {
+            let k = o.keys().next().unwrap().as_str();
+            if matches!(
+                k,
+                "Op" | "Seq" | "Choice" | "First" | "Loop" | "App" | "Arr" | "Const"
+                    | "Handle" | "Let" | "Lit"
+            ) {
+                return Value::String("<term>".to_string());
+            }
+        }
+    }
     match value {
         Value::Object(o) => Value::Object(
             o.iter()
