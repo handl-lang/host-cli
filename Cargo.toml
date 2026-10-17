@@ -52,7 +52,6 @@ handl-value = { path = "../kernel/crates/handl-value" }
 plugin-engine = { path = "../kernel/crates/plugin-engine" }
 
 [patch."https://github.com/handl-lang/platform"]
-handl-emitters = { path = "../platform/crates/handl-emitters" }
 handl-host-tooling = { path = "../platform/crates/host-tooling" }
 handl-kit-arrow-lower = { path = "../platform/crates/handl-kit-arrow-lower" }
 handl-kit-data = { path = "../platform/crates/handl-kit-data" }
