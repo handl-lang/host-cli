@@ -46,12 +46,16 @@ handl-plugin-lib-lang-run-compiled = { path = "../stdlib/modules/lib-lang-run-co
 handl-plugin-lib-lang-typecheck = { path = "../stdlib/modules/lib-lang-typecheck" }
 handl-plugin-lib-stdlib = { path = "../stdlib/crates/plugin-lib-stdlib" }
 
+[patch."https://github.com/handl-lang/kernel"]
+handl-language = { path = "../kernel/crates/handl-language" }
+handl-value = { path = "../kernel/crates/handl-value" }
+plugin-engine = { path = "../kernel/crates/plugin-engine" }
+
 [patch."https://github.com/handl-lang/platform"]
 handl-emitters = { path = "../platform/crates/handl-emitters" }
 handl-host-tooling = { path = "../platform/crates/host-tooling" }
 handl-kit-arrow-lower = { path = "../platform/crates/handl-kit-arrow-lower" }
 handl-kit-data = { path = "../platform/crates/handl-kit-data" }
-handl-language = { path = "../platform/crates/handl-language" }
 handl-platform = { path = "../platform/crates/platform" }
 handl-plugin-applier-bootstrap = { path = "../platform/crates/plugin-applier-bootstrap" }
 handl-plugin-compile = { path = "../platform/crates/plugin-compile" }
@@ -88,9 +92,6 @@ handl-plugin-lib-tag = { path = "../platform/crates/plugin-lib-tag" }
 handl-plugin-module = { path = "../platform/crates/plugin-module" }
 handl-plugin-sdkgen = { path = "../platform/crates/plugin-sdkgen" }
 handl-runtime = { path = "../platform/crates/handl-runtime" }
-handl-value = { path = "../platform/crates/handl-value" }
-plugin-engine = { path = "../platform/crates/plugin-engine" }
-
 # Match platform's dev profile: unoptimized (opt-level=0) builds overflow the
 # default test-thread stack in the recursive tree-walk eval.
 [profile.dev]
