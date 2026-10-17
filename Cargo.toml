@@ -99,6 +99,48 @@ opt-level = 1
 # The extracted target repos: the platform-HEAD manifests patched above dep
 # on these git sources; map them to the same sibling checkouts so no
 # git-sourced package enters the graph.
+[patch."https://github.com/handl-lang/lib-arrow-iter"]
+handl-lib-arrow-iter = { path = "../lib-arrow-iter" }
+
+[patch."https://github.com/handl-lang/lib-bytes"]
+handl-lib-bytes = { path = "../lib-bytes" }
+
+[patch."https://github.com/handl-lang/lib-cmp"]
+handl-lib-cmp = { path = "../lib-cmp" }
+
+[patch."https://github.com/handl-lang/lib-combinators"]
+handl-lib-combinators = { path = "../lib-combinators" }
+
+[patch."https://github.com/handl-lang/lib-dedent"]
+handl-lib-dedent = { path = "../lib-dedent" }
+
+[patch."https://github.com/handl-lang/lib-error"]
+handl-lib-error = { path = "../lib-error" }
+
+[patch."https://github.com/handl-lang/lib-hello"]
+handl-lib-hello = { path = "../lib-hello" }
+
+[patch."https://github.com/handl-lang/lib-mood"]
+handl-lib-mood = { path = "../lib-mood" }
+
+[patch."https://github.com/handl-lang/lib-obj"]
+handl-lib-obj = { path = "../lib-obj" }
+
+[patch."https://github.com/handl-lang/lib-ops"]
+handl-lib-ops = { path = "../lib-ops" }
+
+[patch."https://github.com/handl-lang/lib-stats"]
+handl-lib-stats = { path = "../lib-stats" }
+
+[patch."https://github.com/handl-lang/lib-str-handl"]
+handl-lib-str-handl = { path = "../lib-str-handl" }
+
+[patch."https://github.com/handl-lang/lib-tar"]
+handl-lib-tar = { path = "../lib-tar" }
+
+[patch."https://github.com/handl-lang/lib-type"]
+handl-lib-type = { path = "../lib-type" }
+
 [patch."https://github.com/handl-lang/python"]
 handl-plugin-sdkgen-emitter-python = { path = "../python/modules/sdkgen-python" }
 
