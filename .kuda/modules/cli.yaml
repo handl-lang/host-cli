@@ -1,0 +1,21 @@
+name: cli
+path: Cargo.toml
+purpose: cli
+api:
+- name: cli
+  kind: module
+  file: Cargo.toml
+  line: 1
+  module: cli
+deps: []
+notes: ''
+verify:
+- Cargo.toml
+provenance:
+  files:
+  - Cargo.toml
+  hashes:
+  - e9fa70cd83fd7a426957b3fc6644ca0337fe2af2
+  commit_sha: a0687ffc81d22801c9dcbb4a9019e7937c18ec6e
+  generated_at: '1792281065'
+  generator: kuda-template/0.1.0

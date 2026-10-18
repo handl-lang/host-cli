@@ -24,10 +24,10 @@ repository = "https://github.com/handl-lang/host-cli"
 # ADR-0149: `hnl` links exactly one sibling crate — the extension ABI. The
 # tools it dispatches to are *not* dependencies; they are `libhnl_ext_*`
 # shared libraries discovered at runtime.
-[patch."https://github.com/handl-lang/kernel"]
-handl-ext = { path = "../kernel/crates/handl-ext" }
-
-# Match platform's dev profile: unoptimized (opt-level=0) builds overflow
-# the default test-thread stack in engine-heavy unit tests.
 [profile.dev]
 opt-level = 1
+
+[patch."https://github.com/handl-lang/kernel"]
+# Match platform's dev profile: unoptimized (opt-level=0) builds overflow
+# the default test-thread stack in engine-heavy unit tests.
+handl-ext = { path = "../kernel/crates/handl-ext" }

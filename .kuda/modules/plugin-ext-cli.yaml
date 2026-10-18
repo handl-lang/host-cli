@@ -1,0 +1,135 @@
+name: plugin-ext-cli
+path: crates/plugin-ext-cli/src/lib.rs
+purpose: plugin-ext-cli
+api:
+- name: Cli
+  kind: type
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 10
+  module: plugin-ext-cli
+- name: Request
+  kind: type
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 13
+  module: plugin-ext-cli
+- name: CliRequest
+  kind: type
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 18
+  module: plugin-ext-cli
+- name: CliBehavior
+  kind: trait
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 28
+  module: plugin-ext-cli
+- name: id
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 31
+  module: plugin-ext-cli
+- name: BasicCli
+  kind: type
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 37
+  module: plugin-ext-cli
+- name: new
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 48
+  module: plugin-ext-cli
+- name: default
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 58
+  module: plugin-ext-cli
+- name: id
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 64
+  module: plugin-ext-cli
+- name: name
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 68
+  module: plugin-ext-cli
+- name: capabilities
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 72
+  module: plugin-ext-cli
+- name: metadata
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 76
+  module: plugin-ext-cli
+- name: run
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 85
+  module: plugin-ext-cli
+- name: Rule
+  kind: type
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 136
+  module: plugin-ext-cli
+- name: accept
+  kind: function
+  file: crates/plugin-ext-cli/src/lib.rs
+  line: 138
+  module: plugin-ext-cli
+deps:
+- handl_platform
+- serde_json
+notes: ''
+verify:
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+- crates/plugin-ext-cli/src/lib.rs
+provenance:
+  files:
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  - crates/plugin-ext-cli/src/lib.rs
+  hashes:
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
+  commit_sha: a0687ffc81d22801c9dcbb4a9019e7937c18ec6e
+  generated_at: '1792281065'
+  generator: kuda-template/0.1.0

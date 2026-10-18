@@ -1,0 +1,55 @@
+name: handl-host-cli
+path: crates/host-cli/Cargo.toml
+purpose: '`hnl` CLI internal library surface (enables `cargo test --lib`).'
+api:
+- name: handl-host-cli
+  kind: module
+  file: crates/host-cli/Cargo.toml
+  line: 1
+  module: handl-host-cli
+deps:
+- handl-host-tooling
+- handl-kit-arrow-lower
+- handl-kit-canonical
+- handl-kit-data
+- handl-kit-data-canonical
+- handl-language
+- handl-platform
+- handl-plugin-applier-bootstrap
+- handl-plugin-compile
+- handl-plugin-compile-dot
+- handl-plugin-compile-handl
+- handl-plugin-compile-js
+- handl-plugin-compile-llvm
+- handl-plugin-compile-sexp
+- handl-plugin-compile-term
+- handl-plugin-engine-fmt
+- handl-plugin-engine-lex-pattern
+- handl-plugin-engine-parse
+- handl-plugin-engine-parse-pratt
+- handl-plugin-engine-test
+- handl-plugin-engine-transform
+- handl-plugin-engine-transform-rewrite
+- handl-plugin-engine-typecheck
+- handl-plugin-ext-cli
+- handl-plugin-ext-compile
+- handl-plugin-ext-diag
+- handl-plugin-ext-fmt
+- handl-plugin-ext-lint
+- handl-plugin-ext-refinement
+- handl-plugin-ext-sdkgen
+- handl-plugin-ext-test
+- handl-plugin-ext-typecheck
+- handl-runtime
+- serde_json
+notes: ''
+verify:
+- crates/host-cli/Cargo.toml
+provenance:
+  files:
+  - crates/host-cli/Cargo.toml
+  hashes:
+  - b6764bcc4e7047df5b9f9d3221711fc5e2451477
+  commit_sha: a0687ffc81d22801c9dcbb4a9019e7937c18ec6e
+  generated_at: '1792281065'
+  generator: kuda-template/0.1.0
