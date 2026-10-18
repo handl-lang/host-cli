@@ -1,2 +1,0 @@
--- A module with a failing test.
-test_fail :: assert false

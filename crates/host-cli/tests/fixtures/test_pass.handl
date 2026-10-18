@@ -1,3 +1,0 @@
--- A module with passing tests.
-test_addition :: 1 + 1
-test_number :: 42

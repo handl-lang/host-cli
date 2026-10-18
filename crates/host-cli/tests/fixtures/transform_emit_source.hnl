@@ -1,3 +1,0 @@
--- a comment at the top
-
-main = double (1  +  2)   -- weird spacing + trailing comment
