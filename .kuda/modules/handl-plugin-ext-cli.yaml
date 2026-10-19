@@ -1,12 +1,12 @@
-name: handl-plugin-ext-cli
+name: hnl-ext-cli
 path: crates/plugin-ext-cli/Cargo.toml
 purpose: CLI extension — the `cli` capability adapter.
 api:
-- name: handl-plugin-ext-cli
+- name: hnl-ext-cli
   kind: module
   file: crates/plugin-ext-cli/Cargo.toml
   line: 1
-  module: handl-plugin-ext-cli
+  module: hnl-ext-cli
 deps:
 - handl-platform
 - serde_json
