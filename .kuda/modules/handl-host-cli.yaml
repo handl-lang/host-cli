@@ -1,55 +1,162 @@
 name: handl-host-cli
 path: crates/host-cli/Cargo.toml
-purpose: '`hnl` CLI internal library surface (enables `cargo test --lib`).'
+purpose: '`hnl` — a dumb host that discovers `hnl_ext_*` extensions and dispatches argv to them (ADR-0149).'
 api:
 - name: handl-host-cli
   kind: module
   file: crates/host-cli/Cargo.toml
   line: 1
   module: handl-host-cli
+- name: run_hnl
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 13
+  module: handl-host-cli
+- name: run_hnl_no_ext_env
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 25
+  module: handl-host-cli
+- name: version_prints_and_exits_zero
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 40
+  module: handl-host-cli
+- name: help_lists_host_commands_and_discovery_rules
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 47
+  module: handl-host-cli
+- name: ext_list_with_empty_dir_reports_none
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 63
+  module: handl-host-cli
+- name: ext_doctor_reports_candidate_dirs
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 73
+  module: handl-host-cli
+- name: unknown_command_is_a_clean_error
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 81
+  module: handl-host-cli
+- name: no_args_is_a_usage_error
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 91
+  module: handl-host-cli
+- name: main
+  kind: function
+  file: crates/host-cli/src/main.rs
+  line: 10
+  module: handl-host-cli
+- name: run
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 26
+  module: handl-host-cli
+- name: Action
+  kind: type
+  file: crates/host-cli/src/lib.rs
+  line: 65
+  module: handl-host-cli
+- name: ParsedHostArgs
+  kind: type
+  file: crates/host-cli/src/lib.rs
+  line: 75
+  module: handl-host-cli
+- name: parse_host_args
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 87
+  module: handl-host-cli
+- name: dispatch
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 149
+  module: handl-host-cli
+- name: write_stream
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 176
+  module: handl-host-cli
+- name: help_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 194
+  module: handl-host-cli
+- name: ext_list_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 228
+  module: handl-host-cli
+- name: ext_doctor_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 254
+  module: handl-host-cli
+- name: unknown_command_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 290
+  module: handl-host-cli
+- name: tests
+  kind: module
+  file: crates/host-cli/src/lib.rs
+  line: 317
+  module: handl-host-cli
+- name: argv
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 320
+  module: handl-host-cli
+- name: command_passes_remaining_args_verbatim
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 325
+  module: handl-host-cli
+- name: ext_dir_is_repeatable_and_supports_equals_form
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 340
+  module: handl-host-cli
+- name: meta_commands_are_host_level
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 361
+  module: handl-host-cli
+- name: no_command_is_a_usage_error
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 391
+  module: handl-host-cli
+- name: unknown_command_names_loaded_commands
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 397
+  module: handl-host-cli
 deps:
-- handl-host-tooling
-- handl-kit-arrow-lower
-- handl-kit-prelude
-- handl-kit-data
-- handl-kit-data-prelude
-- handl-language
-- handl-platform
-- handl-plugin-applier-bootstrap
-- handl-plugin-compile
-- handl-plugin-compile-dot
-- handl-plugin-compile-handl
-- handl-plugin-compile-js
-- handl-plugin-compile-llvm
-- handl-plugin-compile-sexp
-- handl-plugin-compile-term
-- hnl-engine-fmt
-- hnl-engine-lex-pattern
-- hnl-engine-parse
-- hnl-engine-parse-pratt
-- hnl-engine-test
-- hnl-engine-transform
-- hnl-engine-transform-rewrite
-- hnl-engine-typecheck
-- hnl-ext-cli
-- hnl-ext-compile
-- handl-plugin-ext-diag
-- hnl-ext-fmt
-- hnl-ext-lint
-- handl-plugin-ext-refinement
-- hnl-ext-sdkgen
-- hnl-ext-test
-- hnl-ext-typecheck
-- handl-runtime
-- serde_json
+- handl-ext
+- handl_ext
 notes: ''
 verify:
 - crates/host-cli/Cargo.toml
+- crates/host-cli/src/lib.rs
+- crates/host-cli/src/main.rs
+- crates/host-cli/tests/host.rs
 provenance:
   files:
   - crates/host-cli/Cargo.toml
+  - crates/host-cli/src/lib.rs
+  - crates/host-cli/src/main.rs
+  - crates/host-cli/tests/host.rs
   hashes:
-  - b6764bcc4e7047df5b9f9d3221711fc5e2451477
-  commit_sha: a0687ffc81d22801c9dcbb4a9019e7937c18ec6e
-  generated_at: '1792281065'
-  generator: kuda-template/0.1.0
+  - 5327e313f0aab0b22e918dc7c7e60d299ac379ab
+  - bad0ff18381bdec3ea0690ddbce0ce30830e0db3
+  - a9873a6fc19d4b6769b8aa5aff12b2c5dd36b1bd
+  - e584878784a0e92e5e2b7ff246a8eacb4dc8bb19
+  commit_sha: 285f871bf519927a183044923dd03308e8e6cc1b
+  generated_at: '1792430614'
+  generator: kuda-template/0.1.1

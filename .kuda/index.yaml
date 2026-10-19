@@ -1,42 +1,25 @@
 name: host-cli
 root: /home/luis/GitHub/handl-lang/host-cli
-purpose: ''
+purpose: 'The `hnl` CLI host (ADR-0149: *dumb host*).'
 modules:
-- cli
 - handl-host-cli
-- handl-plugin-ext-cli
 - host-cli
-- plugin-ext-cli
 commands:
 - cargo check
 - cargo test --workspace
 provenance:
   files:
   - Cargo.toml
-  - crates/plugin-ext-cli/Cargo.toml
   - crates/host-cli/Cargo.toml
-  - crates/plugin-ext-cli/src/lib.rs
-  - crates/host-cli/tests/integration.rs
-  - crates/host-cli/tests/compile_smoke.rs
-  - crates/host-cli/tests/transform.rs
-  - crates/host-cli/tests/eval_e2e.rs
-  - crates/host-cli/tests/cli_commands.rs
+  - crates/host-cli/tests/host.rs
   - crates/host-cli/src/main.rs
-  - crates/host-cli/src/transform_categorical.rs
   - crates/host-cli/src/lib.rs
   hashes:
-  - e9fa70cd83fd7a426957b3fc6644ca0337fe2af2
-  - e4873f5404e00c825e916ae2c06605a4cfece70e
-  - b6764bcc4e7047df5b9f9d3221711fc5e2451477
-  - 11655fd7af98d3f85dddfba66a05eb7b2eb654bc
-  - 36cb01039b018888cb737b93167aef95b3c4decc
-  - 6cbc6c579f5c25267cfd8acec9d820ee0cb965c6
-  - 177379e6fe7255a3429ba4a20f1f4e4b6c6a03ff
-  - 0a15adf6d7ceabd3f4b830a821cf43e48feae35b
-  - e3f0c2662fa4e34e600977c2a8419909c3d1f2ff
-  - 574cb6bdc38b9b1eb9c211cc17889ff02dd3cc1c
-  - 7e4720fa2c0f7b0e9839d052d9eab7c41d4219df
-  - e63c734ca5c158d0734b05cf39255e9eaf7551e6
-  commit_sha: a0687ffc81d22801c9dcbb4a9019e7937c18ec6e
-  generated_at: '1792281065'
+  - 22be4bd33d0e8fce6f4d2d5c8cb257aa87f3d0d9
+  - 5327e313f0aab0b22e918dc7c7e60d299ac379ab
+  - e584878784a0e92e5e2b7ff246a8eacb4dc8bb19
+  - a9873a6fc19d4b6769b8aa5aff12b2c5dd36b1bd
+  - bad0ff18381bdec3ea0690ddbce0ce30830e0db3
+  commit_sha: 285f871bf519927a183044923dd03308e8e6cc1b
+  generated_at: '1792430614'
   generator: kuda/0.1.0
