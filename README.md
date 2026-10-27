@@ -15,6 +15,28 @@ in its own `ext-*` repo, discovered via `--ext-dir`, `$HANDL_EXT_DIR`,
 `plugin-ext-cli` capability adapter was pruned by ADR-0149: dispatch now
 goes straight to the extension, not through a `cli` capability.
 
+## Install (prebuilt)
+
+A release tarball ships the host plus the `eval`, `fmt` and `typecheck`
+extensions for linux-x86_64 — no Rust toolchain, no sibling checkouts:
+
+```bash
+curl -LO https://github.com/handl-lang/host-cli/releases/download/v0.1.0/hnl-v0.1.0-linux-x86_64.tar.gz
+tar xzf hnl-v0.1.0-linux-x86_64.tar.gz && cd hnl-v0.1.0
+./install.sh                 # ~/.local/bin/hnl + ~/.handl/ext/*.so
+hnl eval '1 + 2'             # 3
+hnl run examples/hello.hnl   # 3
+hnl typecheck examples/hello.hnl
+hnl ext list                 # what was discovered
+```
+
+`./install.sh` writes to the two paths `hnl` searches by default
+(`$PATH` for the binary, `~/.handl/ext` for the extensions), so nothing
+else needs setting. `PREFIX=/usr/local ./install.sh` overrides the
+binary location.
+
+## Build from source
+
 ```bash
 cargo build -p handl-host-cli          # target/debug/hnl
 hnl --help                             # meta commands + loaded extensions
