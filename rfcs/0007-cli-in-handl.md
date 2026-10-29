@@ -3,19 +3,17 @@ title: CLI in handl — Tool Integration via the handl Plugin System
 type: rfc
 date: 2026-09-04
 status: draft
+status_note: |-
+  Low priority. Realizes the end-state intent of
+  [ADR-0029 — CLI as Capability Orchestrator](../adrs/0029-cli-as-capability-orchestrator.md)
+  in handl, replacing the bootstrap CLI of
+  [ADR-0090](../adrs/0090-bootstrap-cli.md). Depends on
+  [RFC-0001](0001-plugin-system-in-handl.md) (the plugin system it loads) and
+  the tool RFCs [0002](0002-formatter-in-handl.md)–[0006](0006-lsp-server-in-handl.md),
+  which each ship a CLI integration.
 ---
 
 # RFC-0007: CLI in handl — Tool Integration via the handl Plugin System
-
-## Status
-
-Low priority. Realizes the end-state intent of
-[ADR-0029 — CLI as Capability Orchestrator](../adrs/0029-cli-as-capability-orchestrator.md)
-in handl, replacing the bootstrap CLI of
-[ADR-0090](../adrs/0090-bootstrap-cli.md). Depends on
-[RFC-0001](0001-plugin-system-in-handl.md) (the plugin system it loads) and
-the tool RFCs [0002](0002-formatter-in-handl.md)–[0006](0006-lsp-server-in-handl.md),
-which each ship a CLI integration.
 
 ## Summary
 

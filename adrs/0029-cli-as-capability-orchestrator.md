@@ -3,6 +3,7 @@ title: CLI as Capability Orchestrator
 type: adr
 date: 2026-08-24
 status: proposed
+status_note: Proposed
 ---
 
 # CLI as Capability Orchestrator
@@ -187,7 +188,3 @@ No layer should require the layer above it:
 - Tooling can consume language protocols without knowing the compiler.
 - Targets can be installed independently.
 - Implementations can be replaced independently.
-
-## Status
-
-Proposed

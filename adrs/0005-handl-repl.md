@@ -3,6 +3,7 @@ title: Handl REPL
 type: adr
 date: 2026-10-16
 status: proposed
+status_note: Proposed
 ---
 
 # Handl REPL
@@ -175,7 +176,3 @@ Add a `handl/repl` custom LSP command that the editor sends expressions to.
 ### Neutral
 
 - **No impact on the LSP server or editor extensions** — the REPL is a separate CLI mode.
-
-## Status
-
-Proposed
