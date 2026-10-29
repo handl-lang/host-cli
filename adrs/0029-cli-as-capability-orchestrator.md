@@ -1,3 +1,10 @@
+---
+title: CLI as Capability Orchestrator
+type: adr
+date: 2026-08-24
+status: proposed
+---
+
 # CLI as Capability Orchestrator
 
 ## Context

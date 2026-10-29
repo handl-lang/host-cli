@@ -1,3 +1,10 @@
+---
+title: Handl REPL
+type: adr
+date: 2026-10-16
+status: proposed
+---
+
 # Handl REPL
 
 ## Context

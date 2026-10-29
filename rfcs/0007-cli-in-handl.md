@@ -1,3 +1,10 @@
+---
+title: CLI in handl — Tool Integration via the handl Plugin System
+type: rfc
+date: 2026-09-04
+status: draft
+---
+
 # RFC-0007: CLI in handl — Tool Integration via the handl Plugin System
 
 ## Status

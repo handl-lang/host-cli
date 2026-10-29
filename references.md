@@ -1,3 +1,9 @@
+---
+title: Canonical ADR references
+type: reference
+date: 2026-10-15
+---
+
 # Canonical ADR references
 
 ADRs that define ports, the kernel, or composition stay in

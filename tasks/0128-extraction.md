@@ -1,3 +1,9 @@
+---
+title: Task 0128 — `cli/` extraction (ADR-0128 Phase 8)
+type: task
+date: 2026-10-15
+---
+
 # Task 0128 — `cli/` extraction (ADR-0128 Phase 8)
 
 Expand ADR-0128 Phase 8 for this repo. The docs are already on
