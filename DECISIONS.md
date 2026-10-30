@@ -11,18 +11,14 @@ this is the recall surface (ADR-0161 §8). Superseded records are excluded.
 
 ### Handl REPL
 
-- **Bindings**: let x = expr creates a binding visible in subsequent inputs — [ADR-0005](adrs/0005-handl-repl.md)
-- **Loaded arrows**: :l arrows/fn/map.hnl makes map available as a value — [ADR-0005](adrs/0005-handl-repl.md)
-- **Active kit**: determined by .handl.toml in the current directory (same resolution as the LSP server) — [ADR-0005](adrs/0005-handl-repl.md)
-- ⇒ shows the evaluated value (or value type) — [ADR-0005](adrs/0005-handl-repl.md)
-- ⇝ shows the inferred refinement type — [ADR-0005](adrs/0005-handl-repl.md)
-- Resolve .handl.toml from the current directory — [ADR-0005](adrs/0005-handl-repl.md)
-- Load the kit's data files (lexer rules, tokens, grammar) — [ADR-0005](adrs/0005-handl-repl.md)
-- Create a Kit instance — [ADR-0005](adrs/0005-handl-repl.md)
-- For each input: lex → parse → typecheck → eval, using the kit's engines — [ADR-0005](adrs/0005-handl-repl.md)
-- Arrow names from loaded files — [ADR-0005](adrs/0005-handl-repl.md)
-- Combinator names (arr, comp, first, choice, loop, id) — [ADR-0005](adrs/0005-handl-repl.md)
-- : commands — [ADR-0005](adrs/0005-handl-repl.md)
+- **Architecture.** handl repl ├── Prompt: handl> ├── Input: single-line or multi-line expressions ├── Evaluate: lex →… — [ADR-0005](adrs/0005-handl-repl.md)
+- **Commands.** — [ADR-0005](adrs/0005-handl-repl.md)
+- **Session state.** The REPL maintains a persistent environment across inputs: — [ADR-0005](adrs/0005-handl-repl.md)
+- **Multi-line input.** If a line ends with an incomplete expression (open bracket, unclosed do block, trailing… — [ADR-0005](adrs/0005-handl-repl.md)
+- **Output format.** handl> arr("double") >>> fold(0, +) ⇒ <arrow: In ~> Out> ⇝ In: List(Int) ~> Out: Int ⇝ Guarantee:… — [ADR-0005](adrs/0005-handl-repl.md)
+- **Integration with existing infrastructure.** The REPL uses the same kit loading as the CLI host and LSP server: — [ADR-0005](adrs/0005-handl-repl.md)
+- **History and readline.** Use the rustyline crate for line editing, history, and tab completion. Tab completion… — [ADR-0005](adrs/0005-handl-repl.md)
+- **Error handling.** Parse errors, type errors, and refinement errors are printed in-place without killing the session: — [ADR-0005](adrs/0005-handl-repl.md)
 
 ### CLI as Capability Orchestrator
 
