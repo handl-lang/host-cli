@@ -6,31 +6,11 @@ status: proposed
 status_note: Proposed
 ---
 
+
 # Handl REPL
 
-## Context
-
-Handl development currently requires a full file write + server round-trip to evaluate expressions. There is no way to interactively experiment with arrows, inspect refinement types, or test combinators without creating a `.hnl` file and opening it in an editor.
-
-A REPL (Read-Eval-Print Loop) would let developers:
-
-- Evaluate handl expressions interactively
-- Inspect inferred refinement types for expressions
-- Test arrow compositions without writing files
-- Explore the standard library
-- Debug refinement inference step by step
-
-The platform already has the infrastructure:
-
-- `handl-kit-data-canonical` — lexer, parser, evaluator, typechecker (all data-driven)
-- `handl-host-cli` — a CLI host that loads kits and runs commands
-- `handl-plugin-engine-exec-tree-walk` — tree-walking evaluator
-- `handl-plugin-engine-typecheck-nbe` — normalization-by-evaluation typechecker
-- `handl-plugin-ext-refinement` — refinement inference engine
-
-A REPL is a new mode for the existing CLI host, not a new binary.
-
 ## Decision
+
 
 Add an interactive REPL mode to `handl-host-cli`, activated by `handl repl` (or running `handl` with no arguments).
 
@@ -125,41 +105,21 @@ handl> [1, "two", 3]
   ⚠ Type error: expected Int, got String at index 1
 ```
 
-## Alternatives Considered
 
-### Alternative A: Separate `handl-repl` binary
+## Why
 
-Create a new crate `handl-host-repl` as a standalone binary.
+Handl development currently requires a full file write + server round-trip to evaluate expressions. There is no way to interactively experiment with arrows, inspect refinement types, or test combinators without creating a `.hnl` file and opening it in an editor.
 
-**Rejected because:**
+## Not doing
 
 - The REPL uses the same kit loading, parsing, and evaluation as the CLI host. Duplicating this logic in a new binary creates maintenance burden.
 - `handl-host-cli` already has the infrastructure for loading kits and running commands. The REPL is just a new interactive mode.
 - One binary is simpler for users: `handl repl` vs remembering a separate `handl-repl` command.
-
-### Alternative B: Web-based playground
-
-Build a web REPL (like TypeScript Playground) instead of a terminal REPL.
-
-**Rejected because:**
-
 - Requires a JS/WASM backend to run handl in the browser, which doesn't exist yet (see ADR 0006).
 - A terminal REPL is faster to build, works offline, and integrates with existing terminal workflows.
 - A web playground can be built later as a separate effort.
 
-### Alternative C: Embedded REPL in the LSP server
-
-Add a `handl/repl` custom LSP command that the editor sends expressions to.
-
-**Rejected because:**
-
-- LSP is designed for document editing, not interactive evaluation. The request/response model doesn't fit a stateful REPL session.
-- A terminal REPL works in any terminal, independent of the editor.
-- Mixing REPL state with LSP document state would be confusing.
-
 ## Consequences
-
-### Positive
 
 - **Interactive development** — developers can experiment without creating files
 - **Refinement inspection** — `:t` and `:trace` make refinement inference tangible
@@ -167,12 +127,10 @@ Add a `handl/repl` custom LSP command that the editor sends expressions to.
 - **Kit switching** — `:kit` command lets developers compare syntax variants
 - **Uses existing infrastructure** — no new engines, just a new CLI mode
 
-### Negative
+## Enforcement
 
-- **`rustyline` dependency** — adds one crate dependency to `handl-host-cli`. Minimal impact (pure Rust, no system deps).
-- **Session state complexity** — the REPL must manage a persistent environment (bindings, loaded arrows, active kit). This is new state management logic not present in the current CLI.
-- **Multi-line input parsing** — detecting incomplete expressions requires partial parse logic, which may need a helper in the parser.
+- Code and tests are named in the design doc.
 
-### Neutral
+## Design
 
-- **No impact on the LSP server or editor extensions** — the REPL is a separate CLI mode.
+The full record (context, tables, phases, trade-offs): [`design/0005-handl-repl.md`](../design/0005-handl-repl.md).
