@@ -1,0 +1,8 @@
+name = "host-cli"
+
+[next]
+t = 1
+i = 1
+p = 1
+adr = 30
+pl = 1

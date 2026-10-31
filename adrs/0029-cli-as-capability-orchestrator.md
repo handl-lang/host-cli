@@ -1,3 +1,10 @@
++++
+id = "ADR-0029"
+title = "CLI as Capability Orchestrator"
+status = "open"
+priority = "medium"
++++
+
 ---
 title: CLI as Capability Orchestrator
 type: adr

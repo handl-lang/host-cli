@@ -1,3 +1,10 @@
++++
+id = "ADR-0005"
+title = "Handl REPL"
+status = "open"
+priority = "medium"
++++
+
 ---
 title: Handl REPL
 type: adr
