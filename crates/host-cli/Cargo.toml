@@ -5,6 +5,9 @@ edition.workspace = true
 description = "`hnl` — a dumb host that discovers `hnl_ext_*` extensions and dispatches argv to them (ADR-0149)."
 license.workspace = true
 repository.workspace = true
+readme = "../../README.md"
+keywords = ["handl", "cli"]
+categories = ["development-tools"]
 
 [[bin]]
 name = "hnl"

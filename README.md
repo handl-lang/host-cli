@@ -52,3 +52,7 @@ The project docs live on the `project` branch, mounted at `project/`
 git worktree list        # main + project
 git -C project log       # docs history
 ```
+
+## License
+
+MIT.

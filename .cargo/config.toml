@@ -4,3 +4,6 @@
 # what the platform suite effectively gets.
 [env]
 RUST_MIN_STACK = "33554432"
+
+[alias]
+xtask = "run --manifest-path xtask/Cargo.toml --"
