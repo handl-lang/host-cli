@@ -7,7 +7,7 @@
 
 [[repos]]
 name = "handl-lang/host-cli"
-dir = "/home/luis/GitHub/handl-lang/host-cli"
+dir = "~/GitHub/handl-lang/host-cli"
 branch = "refs/heads/main"
   [repos.runner]
   kind = "script"
