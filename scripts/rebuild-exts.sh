@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # rebuild-exts.sh — rebuild every dynamically-loaded `hnl` extension.
 #
-# `hnl` is a dumb host: each subcommand (`test`, `sdkgen`, `fmt`, `lint`,
+# `hnl` is a dumb host: each subcommand (`test`, `codegen`, `fmt`, `lint`,
 # `typecheck`, ...) is a cdylib (`libhnl_ext_<name>.so`) built from a
 # sibling `ext-*` repo and loaded from $CARGO_TARGET_DIR/debug at runtime.
 # When a shared dependency (kit-core, lib-*, kernel) changes, an
