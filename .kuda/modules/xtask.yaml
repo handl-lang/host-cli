@@ -1,0 +1,39 @@
+name: xtask
+path: xtask/Cargo.toml
+purpose: Repo gate tasks — vendored per Rust repo as `xtask/`.
+api:
+- name: cargo
+  kind: function
+  file: xtask/src/main.rs
+  line: 11
+  module: xtask
+- name: gate
+  kind: function
+  file: xtask/src/main.rs
+  line: 20
+  module: xtask
+- name: main
+  kind: function
+  file: xtask/src/main.rs
+  line: 35
+  module: xtask
+- name: xtask
+  kind: module
+  file: xtask/Cargo.toml
+  line: 1
+  module: xtask
+deps: []
+notes: ''
+verify:
+- xtask/Cargo.toml
+- xtask/src/main.rs
+provenance:
+  files:
+  - xtask/Cargo.toml
+  - xtask/src/main.rs
+  hashes:
+  - 56825fa02f4bcfa4409922455217615ea0d9d5f0
+  - 37c4870bc28d80c02886ab3611493ad4f0c1710b
+  commit_sha: afb893433548af353f142c9b28bd28f4cea40009
+  generated_at: '1795484421'
+  generator: kuda-template/0.1.4

@@ -4,22 +4,23 @@ purpose: 'The `hnl` CLI host (ADR-0149: *dumb host*).'
 modules:
 - handl-host-cli
 - host-cli
+- xtask
 commands:
 - cargo check
 - cargo test --workspace
+tree_digest: 6304a15c38206d38039ab25b96d97646023431ba
+files_total: 7
 provenance:
   files:
   - Cargo.toml
+  - README.md
   - crates/host-cli/Cargo.toml
-  - crates/host-cli/tests/host.rs
-  - crates/host-cli/src/main.rs
-  - crates/host-cli/src/lib.rs
+  - xtask/Cargo.toml
   hashes:
-  - 22be4bd33d0e8fce6f4d2d5c8cb257aa87f3d0d9
-  - 5327e313f0aab0b22e918dc7c7e60d299ac379ab
-  - e584878784a0e92e5e2b7ff246a8eacb4dc8bb19
-  - a9873a6fc19d4b6769b8aa5aff12b2c5dd36b1bd
-  - bad0ff18381bdec3ea0690ddbce0ce30830e0db3
-  commit_sha: 285f871bf519927a183044923dd03308e8e6cc1b
-  generated_at: '1792430614'
+  - 48edd360d483ff6967da05f7bdd26dd5ce7c8dcf
+  - 38569f6b21da9a790d9c5b2c4f92537b6f96389c
+  - 9fc0664f3591cffca00a38188d648bc6a9c6bf5a
+  - 56825fa02f4bcfa4409922455217615ea0d9d5f0
+  commit_sha: afb893433548af353f142c9b28bd28f4cea40009
+  generated_at: '1795484421'
   generator: kuda/0.1.0

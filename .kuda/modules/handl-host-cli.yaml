@@ -2,61 +2,6 @@ name: handl-host-cli
 path: crates/host-cli/Cargo.toml
 purpose: '`hnl` — a dumb host that discovers `hnl_ext_*` extensions and dispatches argv to them (ADR-0149).'
 api:
-- name: handl-host-cli
-  kind: module
-  file: crates/host-cli/Cargo.toml
-  line: 1
-  module: handl-host-cli
-- name: run_hnl
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 13
-  module: handl-host-cli
-- name: run_hnl_no_ext_env
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 25
-  module: handl-host-cli
-- name: version_prints_and_exits_zero
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 40
-  module: handl-host-cli
-- name: help_lists_host_commands_and_discovery_rules
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 47
-  module: handl-host-cli
-- name: ext_list_with_empty_dir_reports_none
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 63
-  module: handl-host-cli
-- name: ext_doctor_reports_candidate_dirs
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 73
-  module: handl-host-cli
-- name: unknown_command_is_a_clean_error
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 81
-  module: handl-host-cli
-- name: no_args_is_a_usage_error
-  kind: function
-  file: crates/host-cli/tests/host.rs
-  line: 91
-  module: handl-host-cli
-- name: main
-  kind: function
-  file: crates/host-cli/src/main.rs
-  line: 10
-  module: handl-host-cli
-- name: run
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 26
-  module: handl-host-cli
 - name: Action
   kind: type
   file: crates/host-cli/src/lib.rs
@@ -66,46 +11,6 @@ api:
   kind: type
   file: crates/host-cli/src/lib.rs
   line: 75
-  module: handl-host-cli
-- name: parse_host_args
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 87
-  module: handl-host-cli
-- name: dispatch
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 149
-  module: handl-host-cli
-- name: write_stream
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 176
-  module: handl-host-cli
-- name: help_text
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 194
-  module: handl-host-cli
-- name: ext_list_text
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 228
-  module: handl-host-cli
-- name: ext_doctor_text
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 254
-  module: handl-host-cli
-- name: unknown_command_text
-  kind: function
-  file: crates/host-cli/src/lib.rs
-  line: 290
-  module: handl-host-cli
-- name: tests
-  kind: module
-  file: crates/host-cli/src/lib.rs
-  line: 317
   module: handl-host-cli
 - name: argv
   kind: function
@@ -117,25 +22,120 @@ api:
   file: crates/host-cli/src/lib.rs
   line: 325
   module: handl-host-cli
+- name: dispatch
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 149
+  module: handl-host-cli
 - name: ext_dir_is_repeatable_and_supports_equals_form
   kind: function
   file: crates/host-cli/src/lib.rs
   line: 340
+  module: handl-host-cli
+- name: ext_doctor_reports_candidate_dirs
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 73
+  module: handl-host-cli
+- name: ext_doctor_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 254
+  module: handl-host-cli
+- name: ext_list_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 228
+  module: handl-host-cli
+- name: ext_list_with_empty_dir_reports_none
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 63
+  module: handl-host-cli
+- name: handl-host-cli
+  kind: module
+  file: crates/host-cli/Cargo.toml
+  line: 1
+  module: handl-host-cli
+- name: help_lists_host_commands_and_discovery_rules
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 47
+  module: handl-host-cli
+- name: help_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 194
+  module: handl-host-cli
+- name: main
+  kind: function
+  file: crates/host-cli/src/main.rs
+  line: 10
   module: handl-host-cli
 - name: meta_commands_are_host_level
   kind: function
   file: crates/host-cli/src/lib.rs
   line: 361
   module: handl-host-cli
+- name: no_args_is_a_usage_error
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 91
+  module: handl-host-cli
 - name: no_command_is_a_usage_error
   kind: function
   file: crates/host-cli/src/lib.rs
   line: 391
   module: handl-host-cli
+- name: parse_host_args
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 87
+  module: handl-host-cli
+- name: run
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 26
+  module: handl-host-cli
+- name: run_hnl
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 13
+  module: handl-host-cli
+- name: run_hnl_no_ext_env
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 25
+  module: handl-host-cli
+- name: tests
+  kind: module
+  file: crates/host-cli/src/lib.rs
+  line: 317
+  module: handl-host-cli
+- name: unknown_command_is_a_clean_error
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 81
+  module: handl-host-cli
 - name: unknown_command_names_loaded_commands
   kind: function
   file: crates/host-cli/src/lib.rs
   line: 397
+  module: handl-host-cli
+- name: unknown_command_text
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 290
+  module: handl-host-cli
+- name: version_prints_and_exits_zero
+  kind: function
+  file: crates/host-cli/tests/host.rs
+  line: 40
+  module: handl-host-cli
+- name: write_stream
+  kind: function
+  file: crates/host-cli/src/lib.rs
+  line: 176
   module: handl-host-cli
 deps:
 - handl-ext
@@ -153,10 +153,10 @@ provenance:
   - crates/host-cli/src/main.rs
   - crates/host-cli/tests/host.rs
   hashes:
-  - 5327e313f0aab0b22e918dc7c7e60d299ac379ab
+  - 9fc0664f3591cffca00a38188d648bc6a9c6bf5a
   - bad0ff18381bdec3ea0690ddbce0ce30830e0db3
   - a9873a6fc19d4b6769b8aa5aff12b2c5dd36b1bd
   - e584878784a0e92e5e2b7ff246a8eacb4dc8bb19
-  commit_sha: 285f871bf519927a183044923dd03308e8e6cc1b
-  generated_at: '1792430614'
-  generator: kuda-template/0.1.1
+  commit_sha: afb893433548af353f142c9b28bd28f4cea40009
+  generated_at: '1795484421'
+  generator: kuda-template/0.1.4
