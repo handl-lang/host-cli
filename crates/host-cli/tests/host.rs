@@ -55,7 +55,10 @@ fn help_lists_host_commands_and_discovery_rules() {
         "$HANDL_EXT_DIR",
         "~/.handl/ext/",
     ] {
-        assert!(stdout.contains(needle), "help missing `{needle}`:\n{stdout}");
+        assert!(
+            stdout.contains(needle),
+            "help missing `{needle}`:\n{stdout}"
+        );
     }
 }
 

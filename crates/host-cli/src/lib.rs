@@ -174,7 +174,10 @@ fn dispatch(discovery: &Discovery, command: &str, args: &[String]) -> i32 {
 /// Write `bytes` to `stream`; a closed pipe (e.g. `hnl fmt | head -1`)
 /// exits quietly rather than panicking on a failed `print!`.
 fn write_stream(mut stream: impl Write, bytes: &str) {
-    match stream.write_all(bytes.as_bytes()).and_then(|_| stream.flush()) {
+    match stream
+        .write_all(bytes.as_bytes())
+        .and_then(|_| stream.flush())
+    {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
             std::process::exit(0);
@@ -330,7 +333,12 @@ mod tests {
             p.action,
             Action::Command {
                 name: "fmt".into(),
-                args: vec!["--check".into(), "--ext-dir".into(), "x".into(), "f.hnl".into()],
+                args: vec![
+                    "--check".into(),
+                    "--ext-dir".into(),
+                    "x".into(),
+                    "f.hnl".into()
+                ],
             }
         );
         assert!(p.ext_dirs.is_empty());
@@ -372,15 +380,21 @@ mod tests {
             Action::Version
         );
         assert_eq!(
-            parse_host_args(&argv(&["hnl", "--version"])).unwrap().action,
+            parse_host_args(&argv(&["hnl", "--version"]))
+                .unwrap()
+                .action,
             Action::Version
         );
         assert_eq!(
-            parse_host_args(&argv(&["hnl", "ext", "list"])).unwrap().action,
+            parse_host_args(&argv(&["hnl", "ext", "list"]))
+                .unwrap()
+                .action,
             Action::ExtList
         );
         assert_eq!(
-            parse_host_args(&argv(&["hnl", "ext", "doctor"])).unwrap().action,
+            parse_host_args(&argv(&["hnl", "ext", "doctor"]))
+                .unwrap()
+                .action,
             Action::ExtDoctor
         );
         assert!(parse_host_args(&argv(&["hnl", "ext"])).is_err());
