@@ -354,10 +354,6 @@ name = "handl-plugin-compile-term"
 version = "0.1.0"
 
 [[patch.unused]]
-name = "compile-cuda"
-version = "0.0.1"
-
-[[patch.unused]]
 name = "hnl-tool-lex-pattern"
 version = "0.1.0"
 
@@ -580,10 +576,6 @@ version = "0.1.0"
 [[patch.unused]]
 name = "handl-kit-prelude-lang"
 version = "0.1.0"
-
-[[patch.unused]]
-name = "compile-triton"
-version = "0.0.1"
 
 [[patch.unused]]
 name = "handl-lib-ops"
